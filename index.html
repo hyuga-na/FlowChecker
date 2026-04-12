@@ -1,152 +1,709 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FlowChecker</title>
   <style>
+    :root {
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #2563eb;
+      --ok-bg: #ecfdf5;
+      --ok-text: #065f46;
+      --bad-bg: #fef2f2;
+      --bad-text: #991b1b;
+      --wait-bg: #eff6ff;
+      --wait-text: #1d4ed8;
+      --shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
-      font-family: Arial, sans-serif;
       margin: 0;
-      padding: 20px;
-      background: #f5f5f5;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans",
+        "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
+      background: var(--bg);
+      color: var(--text);
     }
+
+    .page {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
     h1 {
-      margin-bottom: 10px;
+      margin: 0 0 8px;
+      font-size: 32px;
     }
-    .container {
+
+    .subtitle {
+      margin: 0 0 20px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .notice {
+      background: #fff7ed;
+      color: #9a3412;
+      border: 1px solid #fdba74;
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-bottom: 20px;
+      line-height: 1.6;
+      font-size: 14px;
+    }
+
+    .status-bar {
       display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: white;
+      border: 1px solid var(--border);
+      font-size: 14px;
+      color: var(--muted);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #9ca3af;
+    }
+
+    .dot.ready { background: #10b981; }
+    .dot.loading { background: #f59e0b; }
+    .dot.error { background: #ef4444; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
       gap: 20px;
     }
-    .input, .output {
-      background: white;
-      padding: 15px;
-      border-radius: 8px;
-      width: 50%;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+
+    @media (max-width: 900px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
     }
-    textarea {
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .panel h2 {
+      margin: 0 0 16px;
+      font-size: 20px;
+    }
+
+    .field {
+      margin-bottom: 14px;
+    }
+
+    .field label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .field textarea {
       width: 100%;
-      height: 60px;
-      margin-bottom: 10px;
+      min-height: 76px;
       resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 15px;
+      line-height: 1.6;
+      background: #fff;
+      color: var(--text);
     }
+
+    .field textarea:focus {
+      outline: none;
+      border-color: #93c5fd;
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.10);
+    }
+
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 8px;
+    }
+
     button {
-      margin-right: 10px;
-      padding: 8px 16px;
+      border: none;
+      border-radius: 12px;
+      padding: 10px 16px;
+      font-size: 14px;
       cursor: pointer;
+      transition: 0.15s ease;
     }
-    .result {
+
+    button.primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    button.secondary {
+      background: #eef2ff;
+      color: #3730a3;
+    }
+
+    button.ghost {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .results {
+      display: grid;
+      gap: 12px;
+    }
+
+    .result-card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px;
+      background: #fff;
+    }
+
+    .result-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
       margin-bottom: 10px;
-      padding: 8px;
-      border-bottom: 1px solid #ddd;
     }
-    .ok {
-      color: green;
+
+    .result-title {
+      font-weight: 700;
     }
-    .bad {
-      color: red;
+
+    .badge {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .badge.ok {
+      background: var(--ok-bg);
+      color: var(--ok-text);
+    }
+
+    .badge.bad {
+      background: var(--bad-bg);
+      color: var(--bad-text);
+    }
+
+    .badge.wait {
+      background: var(--wait-bg);
+      color: var(--wait-text);
+    }
+
+    .pair {
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+
+    .small {
+      margin-top: 10px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    .progress-wrap {
+      margin-top: 10px;
+    }
+
+    .progress-label {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #e5e7eb;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      transition: width 0.2s ease;
+    }
+
+    .footer-note {
+      margin-top: 16px;
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+
+    code.inline {
+      background: #f3f4f6;
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 0.95em;
     }
   </style>
 </head>
 <body>
+  <div class="page">
+    <h1>FlowChecker</h1>
+    <p class="subtitle">
+      5行の研究ロジックを入力し、各行が直前の行から自然につながっているかを
+      ブラウザ内LLMで判定します。
+    </p>
 
-<h1>FlowChecker</h1>
-<p>5行で論理の流れをチェック</p>
+    <div class="notice">
+      初回のみモデルの読み込みに時間がかかることがあります。<br>
+      WebGPU が使える環境では自動で GPU を優先し、使えない場合は CPU で実行します。
+    </div>
 
-<div class="container">
+    <div class="status-bar">
+      <div class="chip">
+        <span id="model-dot" class="dot"></span>
+        <span id="model-status">モデル未ロード</span>
+      </div>
+      <div class="chip">
+        <span id="device-dot" class="dot"></span>
+        <span id="device-status">推論デバイス未決定</span>
+      </div>
+      <div class="chip">
+        <span id="progress-text">待機中</span>
+      </div>
+    </div>
 
-  <div class="input">
-    <h3>入力</h3>
+    <div class="layout">
+      <section class="panel">
+        <h2>入力</h2>
 
-    <label>背景</label>
-    <textarea id="l1"></textarea>
+        <div class="field">
+          <label for="l1">1. 背景</label>
+          <textarea id="l1" placeholder="例: 音声表現には言語情報とパラ言語情報が含まれる"></textarea>
+        </div>
 
-    <label>課題</label>
-    <textarea id="l2"></textarea>
+        <div class="field">
+          <label for="l2">2. 課題</label>
+          <textarea id="l2" placeholder="例: これらを分離することが重要である"></textarea>
+        </div>
 
-    <label>解法</label>
-    <textarea id="l3"></textarea>
+        <div class="field">
+          <label for="l3">3. 解法</label>
+          <textarea id="l3" placeholder="例: 提案手法ではFiLMにより両者を制御的に統合する"></textarea>
+        </div>
 
-    <label>結果</label>
-    <textarea id="l4"></textarea>
+        <div class="field">
+          <label for="l4">4. 結果</label>
+          <textarea id="l4" placeholder="例: 実験では従来法より高い性能を示した"></textarea>
+        </div>
 
-    <label>考察</label>
-    <textarea id="l5"></textarea>
+        <div class="field">
+          <label for="l5">5. 考察</label>
+          <textarea id="l5" placeholder="例: 提案手法は情報分離に有効である可能性が示された"></textarea>
+        </div>
 
-    <br>
-    <button onclick="checkLogic()">チェック</button>
-    <button onclick="clearAll()">クリア</button>
-    <button onclick="sample()">サンプル</button>
+        <div class="buttons">
+          <button id="load-btn" class="secondary">モデルを読み込む</button>
+          <button id="check-btn" class="primary" disabled>チェック</button>
+          <button id="sample-btn" class="ghost">サンプル入力</button>
+          <button id="clear-btn" class="ghost">クリア</button>
+        </div>
+
+        <div class="progress-wrap">
+          <div class="progress-label">モデル読み込み状況</div>
+          <div class="progress-bar">
+            <div id="progress-fill" class="progress-fill"></div>
+          </div>
+        </div>
+
+        <div class="footer-note">
+          判定基準は「直前の行との論理接続」です。<br>
+          1行目は比較対象がないため固定で「問題なし」になります。
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>結果</h2>
+        <div id="results" class="results"></div>
+        <div class="footer-note">
+          2〜5行目はそれぞれ 1→2, 2→3, 3→4, 4→5 の接続を見ています。
+        </div>
+      </section>
+    </div>
   </div>
 
-  <div class="output">
-    <h3>結果</h3>
-    <div id="results"></div>
-  </div>
+  <script type="module">
+    import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.0";
 
-</div>
+    const MODEL_ID = "Xenova/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7";
+    const LABELS = ["問題なし", "飛躍"];
+    const LINE_NAMES = ["背景", "課題", "解法", "結果", "考察"];
 
-<script>
-function simpleJudge(prev, curr, index) {
-  if (index === 0) return "問題なし";
+    let classifier = null;
+    let selectedDevice = "wasm";
+    let isLoading = false;
+    let isChecking = false;
 
-  if (!curr.trim()) return "飛躍";
+    const els = {
+      loadBtn: document.getElementById("load-btn"),
+      checkBtn: document.getElementById("check-btn"),
+      sampleBtn: document.getElementById("sample-btn"),
+      clearBtn: document.getElementById("clear-btn"),
+      modelStatus: document.getElementById("model-status"),
+      modelDot: document.getElementById("model-dot"),
+      deviceStatus: document.getElementById("device-status"),
+      deviceDot: document.getElementById("device-dot"),
+      progressText: document.getElementById("progress-text"),
+      progressFill: document.getElementById("progress-fill"),
+      results: document.getElementById("results"),
+      l1: document.getElementById("l1"),
+      l2: document.getElementById("l2"),
+      l3: document.getElementById("l3"),
+      l4: document.getElementById("l4"),
+      l5: document.getElementById("l5"),
+    };
 
-  const prevWords = prev.split(/[\s、。]/);
-  const currWords = curr.split(/[\s、。]/);
-
-  let overlap = prevWords.filter(w => currWords.includes(w) && w.length > 1);
-
-  if (overlap.length > 0) {
-    return "問題なし";
-  } else {
-    return "飛躍";
-  }
-}
-
-function checkLogic() {
-  const lines = [
-    document.getElementById("l1").value,
-    document.getElementById("l2").value,
-    document.getElementById("l3").value,
-    document.getElementById("l4").value,
-    document.getElementById("l5").value
-  ];
-
-  const resultsDiv = document.getElementById("results");
-  resultsDiv.innerHTML = "";
-
-  for (let i = 0; i < lines.length; i++) {
-    const label = simpleJudge(lines[i-1] || "", lines[i], i);
-
-    const div = document.createElement("div");
-    div.className = "result";
-
-    if (label === "問題なし") {
-      div.innerHTML = `${i+1}行目: <span class="ok">${label}</span>`;
-    } else {
-      div.innerHTML = `${i+1}行目: <span class="bad">${label}</span>`;
+    function supportsWebGPU() {
+      return typeof navigator !== "undefined" && "gpu" in navigator;
     }
 
-    resultsDiv.appendChild(div);
-  }
-}
+    function setModelState(state, text) {
+      els.modelStatus.textContent = text;
+      els.modelDot.className = "dot " + state;
+    }
 
-function clearAll() {
-  for (let i = 1; i <= 5; i++) {
-    document.getElementById("l" + i).value = "";
-  }
-  document.getElementById("results").innerHTML = "";
-}
+    function setDeviceState(state, text) {
+      els.deviceStatus.textContent = text;
+      els.deviceDot.className = "dot " + state;
+    }
 
-function sample() {
-  document.getElementById("l1").value = "音声表現には言語情報とパラ言語情報が含まれる";
-  document.getElementById("l2").value = "これらを分離することが重要である";
-  document.getElementById("l3").value = "FiLMを用いて統合的に処理する";
-  document.getElementById("l4").value = "実験で性能が向上した";
-  document.getElementById("l5").value = "提案手法は有効である";
-}
-</script>
+    function setProgress(text, percent = null) {
+      els.progressText.textContent = text;
+      if (percent === null || Number.isNaN(percent)) {
+        els.progressFill.style.width = "0%";
+      } else {
+        const p = Math.max(0, Math.min(100, percent));
+        els.progressFill.style.width = p + "%";
+      }
+    }
 
+    function getLines() {
+      return [
+        els.l1.value.trim(),
+        els.l2.value.trim(),
+        els.l3.value.trim(),
+        els.l4.value.trim(),
+        els.l5.value.trim(),
+      ];
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function renderInitialResults() {
+      const lines = getLines();
+      const initial = [
+        { index: 0, label: "問題なし", relation: "比較対象なし" },
+        { index: 1, label: "未判定", relation: "背景 → 課題" },
+        { index: 2, label: "未判定", relation: "課題 → 解法" },
+        { index: 3, label: "未判定", relation: "解法 → 結果" },
+        { index: 4, label: "未判定", relation: "結果 → 考察" },
+      ];
+
+      els.results.innerHTML = initial.map((item) => {
+        const prev = item.index === 0 ? "" : lines[item.index - 1];
+        const curr = lines[item.index];
+        const badgeClass =
+          item.label === "問題なし" ? "ok" :
+          item.label === "飛躍" ? "bad" : "wait";
+
+        const pairText = item.index === 0
+          ? "1行目は固定で「問題なし」です。"
+          : `前: ${prev || "（未入力）"}\n次: ${curr || "（未入力）"}`;
+
+        return `
+          <div class="result-card">
+            <div class="result-head">
+              <div class="result-title">${item.index + 1}行目（${LINE_NAMES[item.index]}）</div>
+              <span class="badge ${badgeClass}">${item.label}</span>
+            </div>
+            <div class="pair">${escapeHtml(item.relation)}\n${escapeHtml(pairText)}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderPartialResult(index, label, relation, prev, curr) {
+      const cards = Array.from(els.results.children);
+      const card = cards[index];
+      if (!card) return;
+
+      const badgeClass =
+        label === "問題なし" ? "ok" :
+        label === "飛躍" ? "bad" : "wait";
+
+      card.innerHTML = `
+        <div class="result-head">
+          <div class="result-title">${index + 1}行目（${LINE_NAMES[index]}）</div>
+          <span class="badge ${badgeClass}">${label}</span>
+        </div>
+        <div class="pair">${escapeHtml(relation)}\n${escapeHtml(`前: ${prev || "（未入力）"}\n次: ${curr || "（未入力）"}`)}</div>
+      `;
+    }
+
+    function buildPrompt(prevLabel, currLabel, prevText, currText) {
+      return [
+        `前の行の役割: ${prevLabel}`,
+        `次の行の役割: ${currLabel}`,
+        `前の文: ${prevText}`,
+        `次の文: ${currText}`,
+        "この接続は研究の論理構成として自然か。"
+      ].join("\n");
+    }
+
+    function heuristicFallback(prevText, currText, currIndex) {
+      if (currIndex === 0) return "問題なし";
+      if (!prevText || !currText) return "飛躍";
+
+      const weakPatterns = [
+        ["重要", "手法"],
+        ["課題", "性能向上"],
+        ["結果", "有効"],
+      ];
+
+      for (const [a, b] of weakPatterns) {
+        if (prevText.includes(a) && currText.includes(b)) {
+          return "飛躍";
+        }
+      }
+
+      return "問題なし";
+    }
+
+    async function loadModel() {
+      if (classifier || isLoading) return;
+      isLoading = true;
+      els.loadBtn.disabled = true;
+      els.checkBtn.disabled = true;
+
+      selectedDevice = supportsWebGPU() ? "webgpu" : "wasm";
+      setDeviceState("loading", selectedDevice === "webgpu" ? "WebGPU を試行中" : "CPU (WASM) を使用");
+      setModelState("loading", "モデル読込中");
+      setProgress("モデルを読み込んでいます...", 0);
+
+      try {
+        classifier = await pipeline("zero-shot-classification", MODEL_ID, {
+          device: selectedDevice,
+          dtype: selectedDevice === "webgpu" ? "fp16" : "q8",
+          progress_callback: (progress) => {
+            if (!progress) return;
+            const p = progress.progress ?? 0;
+            const status = progress.status ?? "loading";
+            setProgress(`読込中: ${status}`, p * 100);
+          },
+        });
+
+        setModelState("ready", "モデル読込完了");
+        setDeviceState("ready", selectedDevice === "webgpu" ? "WebGPU で実行" : "CPU (WASM) で実行");
+        setProgress("準備完了", 100);
+        els.checkBtn.disabled = false;
+      } catch (e) {
+        console.warn("WebGPU load failed, fallback to WASM:", e);
+
+        try {
+          selectedDevice = "wasm";
+          setDeviceState("loading", "CPU (WASM) に切替中");
+          setProgress("CPU モードで再読込中...", 10);
+
+          classifier = await pipeline("zero-shot-classification", MODEL_ID, {
+            device: "wasm",
+            dtype: "q8",
+            progress_callback: (progress) => {
+              if (!progress) return;
+              const p = progress.progress ?? 0;
+              const status = progress.status ?? "loading";
+              setProgress(`読込中: ${status}`, p * 100);
+            },
+          });
+
+          setModelState("ready", "モデル読込完了");
+          setDeviceState("ready", "CPU (WASM) で実行");
+          setProgress("準備完了", 100);
+          els.checkBtn.disabled = false;
+        } catch (err) {
+          console.error(err);
+          setModelState("error", "モデル読込失敗");
+          setDeviceState("error", "推論デバイス初期化失敗");
+          setProgress("読込に失敗しました", 0);
+          alert(
+            "モデルの読み込みに失敗しました。\n" +
+            "通信環境、ブラウザ設定、またはGitHub Pages上での再読み込みを確認してください。"
+          );
+        }
+      } finally {
+        isLoading = false;
+        els.loadBtn.disabled = false;
+      }
+    }
+
+    async function classifyPair(prevIndex, currIndex, prevText, currText) {
+      const relation = `${LINE_NAMES[prevIndex]} → ${LINE_NAMES[currIndex]}`;
+
+      if (!prevText || !currText) {
+        return { label: "飛躍", relation };
+      }
+
+      if (!classifier) {
+        return { label: heuristicFallback(prevText, currText, currIndex), relation };
+      }
+
+      const sequence = buildPrompt(
+        LINE_NAMES[prevIndex],
+        LINE_NAMES[currIndex],
+        prevText,
+        currText
+      );
+
+      try {
+        const output = await classifier(sequence, LABELS, {
+          multi_label: false,
+          hypothesis_template: "この接続は {}。"
+        });
+
+        const topLabel = Array.isArray(output.labels) ? output.labels[0] : "飛躍";
+        return {
+          label: topLabel === "問題なし" ? "問題なし" : "飛躍",
+          relation
+        };
+      } catch (e) {
+        console.warn("classification failed, using fallback:", e);
+        return { label: heuristicFallback(prevText, currText, currIndex), relation };
+      }
+    }
+
+    async function checkLogic() {
+      if (isChecking) return;
+      isChecking = true;
+
+      if (!classifier) {
+        const go = confirm(
+          "まだモデルが読み込まれていません。\n" +
+          "OK を押すと先にモデルを読み込みます。"
+        );
+        if (!go) {
+          isChecking = false;
+          return;
+        }
+        await loadModel();
+        if (!classifier) {
+          isChecking = false;
+          return;
+        }
+      }
+
+      els.checkBtn.disabled = true;
+      els.loadBtn.disabled = true;
+      setProgress("判定中...", null);
+
+      const lines = getLines();
+      renderInitialResults();
+
+      renderPartialResult(0, "問題なし", "比較対象なし", "", lines[0]);
+
+      for (let i = 1; i < lines.length; i++) {
+        renderPartialResult(i, "判定中", `${LINE_NAMES[i - 1]} → ${LINE_NAMES[i]}`, lines[i - 1], lines[i]);
+      }
+
+      try {
+        for (let i = 1; i < lines.length; i++) {
+          setProgress(`${i}/4 件目を判定中...`, (i / 4) * 100);
+          const result = await classifyPair(i - 1, i, lines[i - 1], lines[i]);
+          renderPartialResult(i, result.label, result.relation, lines[i - 1], lines[i]);
+        }
+        setProgress("判定完了", 100);
+      } finally {
+        els.checkBtn.disabled = false;
+        els.loadBtn.disabled = false;
+        isChecking = false;
+      }
+    }
+
+    function clearAll() {
+      els.l1.value = "";
+      els.l2.value = "";
+      els.l3.value = "";
+      els.l4.value = "";
+      els.l5.value = "";
+      renderInitialResults();
+      setProgress(classifier ? "準備完了" : "待機中", classifier ? 100 : 0);
+    }
+
+    function sample() {
+      els.l1.value = "音声表現には言語情報とパラ言語情報が含まれる。";
+      els.l2.value = "そのため、両者を分離して扱える表現学習が重要である。";
+      els.l3.value = "本研究ではFiLMを用いて言語・パラ言語情報を制御的に分離する。";
+      els.l4.value = "感情認識実験において従来法より高い性能を示した。";
+      els.l5.value = "提案手法は音声表現の分離に有効である可能性が示された。";
+      renderInitialResults();
+    }
+
+    els.loadBtn.addEventListener("click", loadModel);
+    els.checkBtn.addEventListener("click", checkLogic);
+    els.clearBtn.addEventListener("click", clearAll);
+    els.sampleBtn.addEventListener("click", sample);
+
+    renderInitialResults();
+
+    if (supportsWebGPU()) {
+      setDeviceState("ready", "WebGPU 利用可能");
+    } else {
+      setDeviceState("ready", "WebGPU 非対応 / CPU (WASM) 想定");
+    }
+    setModelState("ready", "未ロード");
+    setProgress("待機中", 0);
+  </script>
 </body>
 </html>
