@@ -1,3 +1,8 @@
+const APP_VERSION = "v0.3.2";
+console.log("FlowChecker version:", APP_VERSION);
+document.getElementById("app-version").textContent = `Version: ${APP_VERSION}`;
+
+
 import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@next";
 
 const LINE_NAMES = ["背景", "課題", "解法", "結果", "考察"];
