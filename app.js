@@ -468,8 +468,13 @@ function ensureChild(node, lineIndex) {
 
 function collapseChildrenRecursively(node) {
   node.expanded = [false, false, false, false, false];
-  for (const child of node.children) {
-    if (child) collapseChildrenRecursively(child);
+
+  for (let i = 0; i < node.children.length; i++) {
+    const child = node.children[i];
+    if (child) {
+      collapseChildrenRecursively(child);
+      node.expanded[i] = false; // ← 明示的に閉じる
+    }
   }
 }
 
@@ -896,6 +901,11 @@ els.treeRoot.addEventListener("click", async (event) => {
   if (action === "collapse-all-children") {
     if (!node) return;
     collapseChildrenRecursively(node);
+
+    if (node.parent && node.parentLineIndex !== null) {
+      node.parent.expanded[node.parentLineIndex] = false;
+    }
+    
     render();
   }
 });
