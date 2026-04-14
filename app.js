@@ -244,13 +244,15 @@ function buildGenerationPrompt(node, prevIndex, currIndex, prevText, currText) {
     `Previous line: ${prevText}`,
     `Next line: ${currText}`,
     "",
-    "Use exactly one of these bands:",
-    "GOOD = natural transition",
-    "BORDER = somewhat weak or underspecified transition",
-    "BAD = clear jump or unnatural transition",
+    "Return only one word.",
+    "Allowed outputs:",
+    "GOOD",
+    "BORDER",
+    "BAD",
     "",
-    "Return JSON only.",
-    `{"band":"GOOD or BORDER or BAD","reason":"short Japanese sentence"}`,
+    "Do not output any explanation.",
+    "Do not output JSON.",
+    "Do not output punctuation."
   ]
     .filter(Boolean)
     .join("\n");
@@ -342,14 +344,14 @@ function computeTreeScore(node) {
   return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
 
-function extractJsonObject(text) {
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  try {
-    return JSON.parse(match[0]);
-  } catch {
-    return null;
-  }
+function extractBand(text) {
+  const upper = String(text || "").toUpperCase();
+
+  if (upper.includes("GOOD")) return "GOOD";
+  if (upper.includes("BORDER")) return "BORDER";
+  if (upper.includes("BAD")) return "BAD";
+
+  return null;
 }
 
 async function detectWebGPU() {
@@ -373,34 +375,31 @@ async function detectWebGPU() {
 
 async function runGeneratorJudge(node, prevIndex, currIndex, prevText, currText) {
   const prompt = buildGenerationPrompt(node, prevIndex, currIndex, prevText, currText);
+
   const out = await generator(prompt, {
-    max_new_tokens: 100,
+    max_new_tokens: 8,
     do_sample: false,
     temperature: 0,
     return_full_text: false,
   });
 
   const generated = Array.isArray(out) ? out[0]?.generated_text ?? "" : "";
-  const parsed = extractJsonObject(generated);
+  const band = extractBand(generated);
 
-  if (!parsed) {
-    throw new Error("生成結果の JSON 解析に失敗しました");
+  if (!band) {
+    throw new Error(`生成結果から band を抽出できませんでした: ${generated}`);
   }
 
-  const rawBand = String(parsed.band || "").trim().toUpperCase();
   let label = "要確認";
-  if (rawBand === "GOOD") label = "問題なし";
-  if (rawBand === "BAD") label = "飛躍";
-
-  const reason =
-    String(parsed.reason || "").trim() ||
-    buildReason(currIndex, label, prevText, currText);
+  if (band === "GOOD") label = "問題なし";
+  if (band === "BAD") label = "飛躍";
+  if (band === "BORDER") label = "要確認";
 
   return {
     label,
     score: labelToScore(label),
-    reason,
-    scoreText: "generator",
+    reason: buildReason(currIndex, label, prevText, currText),
+    scoreText: `generator band=${band}`,
   };
 }
 
