@@ -1,16 +1,46 @@
-import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.0";
+import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@next";
 
-const MODEL_ID = "onnx-community/multilingual-MiniLMv2-L6-mnli-xnli-ONNX";
 const LINE_NAMES = ["背景", "課題", "解法", "結果", "考察"];
 const FLOW_LABELS = ["問題なし", "飛躍"];
 
+const MODEL_OPTIONS = {
+  small: {
+    kind: "generator",
+    label: "GPU小: 0.5B",
+    model: "onnx-community/Qwen2.5-0.5B-Instruct",
+    device: "webgpu",
+    dtype: "q4",
+  },
+  medium: {
+    kind: "generator",
+    label: "GPU中: 3B",
+    model: "onnx-community/Llama-3.2-3B-Instruct-ONNX",
+    device: "webgpu",
+    dtype: "q4f16",
+  },
+  large: {
+    kind: "generator",
+    label: "GPU大: 7B",
+    model: "onnx-community/Olmo-3-7B-Instruct-ONNX",
+    device: "webgpu",
+    dtype: "q4f16",
+  },
+  cpu: {
+    kind: "classifier",
+    label: "CPU分類器",
+    model: "onnx-community/multilingual-MiniLMv2-L6-mnli-xnli-ONNX",
+    device: "wasm",
+    dtype: "q8",
+  },
+};
+
+let generator = null;
 let classifier = null;
+let activeBackend = null;
 let isLoading = false;
 let isChecking = false;
 let nodeCounter = 0;
-
-const SCORE_UNKNOWN_THRESHOLD = 0.18;
-const MIN_TEXT_LENGTH = 6;
+let lastBackendNote = "未ロード";
 
 function createEmptyResults() {
   return [
@@ -69,6 +99,7 @@ function createNode(depth = 0, title = "ルート", parent = null, parentLineInd
 let tree = createNode(0, "ルート");
 
 const els = {
+  modelSelect: document.getElementById("model-select"),
   loadBtn: document.getElementById("load-btn"),
   analyzeRootBtn: document.getElementById("analyze-root-btn"),
   analyzeAllBtn: document.getElementById("analyze-all-btn"),
@@ -119,8 +150,6 @@ function badgeClass(label) {
       return "badge-problem-none";
     case "飛躍":
       return "badge-jump";
-    case "不明":
-      return "badge-wait";
     default:
       return "badge-wait";
   }
@@ -131,16 +160,7 @@ function countNonEmptyLines(node) {
 }
 
 function shortLabel(label) {
-  switch (label) {
-    case "問題なし":
-      return "問題なし";
-    case "飛躍":
-      return "飛躍";
-    case "不明":
-      return "不明";
-    default:
-      return "未判定";
-  }
+  return label === "飛躍" ? "飛躍" : label === "問題なし" ? "問題なし" : "未判定";
 }
 
 function summarizeNodeLines(node) {
@@ -178,7 +198,38 @@ function getAncestorContext(node, maxDepth = 1) {
   return contexts.join("\n\n");
 }
 
-function buildFlowPrompt(node, prevIndex, currIndex, prevText, currText) {
+function buildGenerationPrompt(node, prevIndex, currIndex, prevText, currText) {
+  const pathText = getNodePathTitles(node).join(" > ");
+  const blockSummary = summarizeNodeLines(node);
+  const ancestorContext = getAncestorContext(node, 1);
+  const parentLineInfo =
+    node.parent && node.parentLineIndex !== null
+      ? `This block expands the parent line "${LINE_NAMES[node.parentLineIndex]}".`
+      : "This is the top-level block.";
+
+  return [
+    "You check whether the transition between two adjacent lines in a research outline is natural.",
+    "Judge only the flow from the previous line to the next line.",
+    "Do not rely only on topic similarity. Focus on research-structure transition.",
+    "",
+    `Block path: ${pathText}`,
+    parentLineInfo,
+    ancestorContext ? `Ancestor context:\n${ancestorContext}` : "",
+    `Current block:\n${blockSummary}`,
+    "",
+    `Previous role: ${LINE_NAMES[prevIndex]}`,
+    `Next role: ${LINE_NAMES[currIndex]}`,
+    `Previous line: ${prevText}`,
+    `Next line: ${currText}`,
+    "",
+    "Return JSON only.",
+    `{"label":"PROBLEM_OK or JUMP","reason":"short Japanese sentence"}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildClassifierPrompt(node, prevIndex, currIndex, prevText, currText) {
   const pathText = getNodePathTitles(node).join(" > ");
   const blockSummary = summarizeNodeLines(node);
   const ancestorContext = getAncestorContext(node, 1);
@@ -208,170 +259,61 @@ function buildFlowPrompt(node, prevIndex, currIndex, prevText, currText) {
     .join("\n");
 }
 
-function getRoleHints(text) {
-  const t = text.trim();
-
-  return {
-    hasMethod:
-      t.includes("提案") ||
-      t.includes("手法") ||
-      t.includes("FiLM") ||
-      t.includes("用いる") ||
-      t.includes("注入") ||
-      t.includes("モデル") ||
-      t.includes("設計") ||
-      t.includes("分離する"),
-    hasResult:
-      t.includes("結果") ||
-      t.includes("性能") ||
-      t.includes("向上") ||
-      t.includes("改善") ||
-      t.includes("実験") ||
-      t.includes("評価") ||
-      t.includes("精度") ||
-      t.includes("示した") ||
-      t.includes("達成"),
-    hasDiscussion:
-      t.includes("有効") ||
-      t.includes("可能性") ||
-      t.includes("示唆") ||
-      t.includes("考えられる") ||
-      t.includes("解釈") ||
-      t.includes("意味"),
-    hasProblem:
-      t.includes("課題") ||
-      t.includes("問題") ||
-      t.includes("必要") ||
-      t.includes("困難") ||
-      t.includes("不足") ||
-      t.includes("未解決") ||
-      t.includes("コスト") ||
-      t.includes("高い"),
-    hasBackground:
-      t.includes("近年") ||
-      t.includes("従来") ||
-      t.includes("一般に") ||
-      t.includes("知られている") ||
-      t.includes("提案されている") ||
-      t.includes("含まれている"),
-  };
-}
-
-function ruleBasedPrecheck(prevIndex, currIndex, prevText, currText) {
+function getHeuristicFlowLabel(prevIndex, currIndex, prevText, currText) {
   const prev = prevText.trim();
   const curr = currText.trim();
 
-  if (!prev || !curr) {
-    return {
-      label: "問題なし",
-      confidence: "high",
-      why: "空欄を含む",
-    };
-  }
+  if (!prev || !curr) return "問題なし";
 
-  if (prev.length < MIN_TEXT_LENGTH || curr.length < MIN_TEXT_LENGTH) {
-    return {
-      label: "不明",
-      confidence: "low",
-      why: "文が短すぎる",
-    };
-  }
+  const currHasMethod =
+    curr.includes("提案") ||
+    curr.includes("手法") ||
+    curr.includes("FiLM") ||
+    curr.includes("用いる") ||
+    curr.includes("注入") ||
+    curr.includes("モデル") ||
+    curr.includes("分離する");
 
-  const h = getRoleHints(curr);
+  const currHasResult =
+    curr.includes("結果") ||
+    curr.includes("性能") ||
+    curr.includes("向上") ||
+    curr.includes("改善") ||
+    curr.includes("実験") ||
+    curr.includes("評価") ||
+    curr.includes("精度") ||
+    curr.includes("示した");
+
+  const currHasDiscussion =
+    curr.includes("有効") ||
+    curr.includes("可能性") ||
+    curr.includes("示唆") ||
+    curr.includes("考えられる") ||
+    curr.includes("解釈");
+
+  const currHasProblem =
+    curr.includes("課題") ||
+    curr.includes("問題") ||
+    curr.includes("必要") ||
+    curr.includes("困難") ||
+    curr.includes("不足") ||
+    curr.includes("未解決") ||
+    curr.includes("ショートカット");
 
   if (prevIndex === 0 && currIndex === 1) {
-    if (h.hasMethod || h.hasResult || h.hasDiscussion) {
-      return {
-        label: "飛躍",
-        confidence: "high",
-        why: "背景の次に課題ではなく別段階の内容が来ている",
-      };
-    }
-    if (h.hasProblem) {
-      return {
-        label: "問題なし",
-        confidence: "medium",
-        why: "背景の次に課題らしい内容が来ている",
-      };
-    }
-    return {
-      label: "不明",
-      confidence: "low",
-      why: "課題らしさが弱い",
-    };
+    if (currHasMethod || currHasResult || currHasDiscussion) return "飛躍";
+    return currHasProblem ? "問題なし" : "飛躍";
   }
-
   if (prevIndex === 1 && currIndex === 2) {
-    if (h.hasMethod) {
-      return {
-        label: "問題なし",
-        confidence: "medium",
-        why: "課題の次に解法らしい内容が来ている",
-      };
-    }
-    if (h.hasResult || h.hasDiscussion) {
-      return {
-        label: "飛躍",
-        confidence: "high",
-        why: "課題の次に結果や考察へ飛んでいる",
-      };
-    }
-    return {
-      label: "不明",
-      confidence: "low",
-      why: "解法らしさが弱い",
-    };
+    return currHasMethod ? "問題なし" : "飛躍";
   }
-
   if (prevIndex === 2 && currIndex === 3) {
-    if (h.hasResult) {
-      return {
-        label: "問題なし",
-        confidence: "medium",
-        why: "解法の次に結果らしい内容が来ている",
-      };
-    }
-    if (h.hasDiscussion) {
-      return {
-        label: "飛躍",
-        confidence: "high",
-        why: "解法の次に考察へ飛んでいる",
-      };
-    }
-    return {
-      label: "不明",
-      confidence: "low",
-      why: "結果らしさが弱い",
-    };
+    return currHasResult ? "問題なし" : "飛躍";
   }
-
   if (prevIndex === 3 && currIndex === 4) {
-    if (h.hasDiscussion) {
-      return {
-        label: "問題なし",
-        confidence: "medium",
-        why: "結果の次に考察らしい内容が来ている",
-      };
-    }
-    if (h.hasMethod || h.hasProblem) {
-      return {
-        label: "飛躍",
-        confidence: "high",
-        why: "結果の次に別段階へ戻っている",
-      };
-    }
-    return {
-      label: "不明",
-      confidence: "low",
-      why: "考察らしさが弱い",
-    };
+    return currHasDiscussion ? "問題なし" : "飛躍";
   }
-
-  return {
-    label: "不明",
-    confidence: "low",
-    why: "規則が当てはまらない",
-  };
+  return "飛躍";
 }
 
 function buildReason(lineIndex, label, prevText, currText, extra = "") {
@@ -381,27 +323,76 @@ function buildReason(lineIndex, label, prevText, currText, extra = "") {
   if (!currText.trim()) {
     return `${currRole}が空欄のため、問題なし扱いにしています。`;
   }
-
   if (lineIndex === 0) {
     return "1行目は比較対象がないため固定で問題なしです。";
   }
-
   if (!prevText.trim()) {
     return `前の行が空欄のため、接続判定は行わず問題なし扱いにしています。`;
   }
-
   if (label === "飛躍") {
     return `${prevRole}から${currRole}への遷移が不自然です。${extra}`.trim();
   }
-
-  if (label === "不明") {
-    return `${prevRole}から${currRole}への接続を自信を持って判定できませんでした。${extra}`.trim();
-  }
-
   return `${prevRole}から${currRole}への接続は自然です。${extra}`.trim();
 }
 
-async function runZeroShot(sequence) {
+function extractJsonObject(text) {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[0]);
+  } catch {
+    return null;
+  }
+}
+
+async function detectWebGPU() {
+  try {
+    if (!window.isSecureContext) {
+      return { ok: false, reason: "secure context ではありません" };
+    }
+    if (!("gpu" in navigator) || !navigator.gpu) {
+      return { ok: false, reason: "navigator.gpu がありません" };
+    }
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) {
+      return { ok: false, reason: "GPU adapter を取得できません" };
+    }
+    await adapter.requestDevice();
+    return { ok: true, reason: "WebGPU 利用可能" };
+  } catch (e) {
+    return { ok: false, reason: `WebGPU 初期化失敗: ${e?.message || "unknown error"}` };
+  }
+}
+
+async function runGeneratorJudge(node, prevIndex, currIndex, prevText, currText) {
+  const prompt = buildGenerationPrompt(node, prevIndex, currIndex, prevText, currText);
+  const out = await generator(prompt, {
+    max_new_tokens: 80,
+    do_sample: false,
+    temperature: 0,
+    return_full_text: false,
+  });
+
+  const generated = Array.isArray(out) ? out[0]?.generated_text ?? "" : "";
+  const parsed = extractJsonObject(generated);
+
+  if (!parsed) {
+    throw new Error("生成結果の JSON 解析に失敗しました");
+  }
+
+  const rawLabel = String(parsed.label || "").trim().toUpperCase();
+  const label = rawLabel === "JUMP" ? "飛躍" : "問題なし";
+  const reason = String(parsed.reason || "").trim() || buildReason(currIndex, label, prevText, currText);
+
+  return {
+    label,
+    reason,
+    scoreText: "generator",
+  };
+}
+
+async function runClassifierJudge(node, prevIndex, currIndex, prevText, currText) {
+  const sequence = buildClassifierPrompt(node, prevIndex, currIndex, prevText, currText);
   const output = await classifier(sequence, FLOW_LABELS, {
     multi_label: false,
     hypothesis_template: "この接続は {}。",
@@ -409,17 +400,13 @@ async function runZeroShot(sequence) {
 
   const labels = Array.isArray(output.labels) ? output.labels : [];
   const scores = Array.isArray(output.scores) ? output.scores : [];
-
-  const firstLabel = labels[0] || "問題なし";
-  const firstScore = typeof scores[0] === "number" ? scores[0] : 0;
-  const secondScore = typeof scores[1] === "number" ? scores[1] : 0;
-  const margin = Math.abs(firstScore - secondScore);
+  const topLabel = labels[0] || "飛躍";
+  const topScore = typeof scores[0] === "number" ? scores[0] : null;
 
   return {
-    label: FLOW_LABELS.includes(firstLabel) ? firstLabel : "問題なし",
-    topScore: firstScore,
-    secondScore,
-    margin,
+    label: FLOW_LABELS.includes(topLabel) ? topLabel : "飛躍",
+    reason: buildReason(currIndex, FLOW_LABELS.includes(topLabel) ? topLabel : "飛躍", prevText, currText),
+    scoreText: topScore == null ? "classifier" : `classifier score=${topScore.toFixed(3)}`,
   };
 }
 
@@ -432,54 +419,23 @@ async function classifyFlow(node, prevIndex, currIndex, prevText, currText) {
     };
   }
 
-  const precheck = ruleBasedPrecheck(prevIndex, currIndex, prevText, currText);
-
-  if (precheck.confidence === "high") {
-    return {
-      label: precheck.label,
-      reason: buildReason(currIndex, precheck.label, prevText, currText, precheck.why),
-      scoreText: `rule: ${precheck.why}`,
-    };
-  }
-
-  if (!classifier) {
-    return {
-      label: precheck.label,
-      reason: buildReason(currIndex, precheck.label, prevText, currText, precheck.why),
-      scoreText: `rule fallback: ${precheck.why}`,
-    };
-  }
-
   try {
-    const sequence = buildFlowPrompt(node, prevIndex, currIndex, prevText, currText);
-    const result = await runZeroShot(sequence);
-
-    if (result.margin < SCORE_UNKNOWN_THRESHOLD) {
-      return {
-        label: "不明",
-        reason: buildReason(
-          currIndex,
-          "不明",
-          prevText,
-          currText,
-          `分類スコア差が小さく、判定が不安定です。`
-        ),
-        scoreText: `model uncertain: top=${result.topScore.toFixed(3)}, margin=${result.margin.toFixed(3)}`,
-      };
+    if (activeBackend?.kind === "generator" && generator) {
+      return await runGeneratorJudge(node, prevIndex, currIndex, prevText, currText);
     }
-
-    return {
-      label: result.label,
-      reason: buildReason(currIndex, result.label, prevText, currText),
-      scoreText: `model: top=${result.topScore.toFixed(3)}, margin=${result.margin.toFixed(3)}`,
-    };
+    if (activeBackend?.kind === "classifier" && classifier) {
+      return await runClassifierJudge(node, prevIndex, currIndex, prevText, currText);
+    }
   } catch (e) {
-    return {
-      label: precheck.label,
-      reason: buildReason(currIndex, precheck.label, prevText, currText, precheck.why),
-      scoreText: `model error / rule fallback: ${precheck.why}`,
-    };
+    console.warn("モデル推論失敗。ヒューリスティックへフォールバック:", e);
   }
+
+  const label = getHeuristicFlowLabel(prevIndex, currIndex, prevText, currText);
+  return {
+    label,
+    reason: buildReason(currIndex, label, prevText, currText),
+    scoreText: "heuristic fallback",
+  };
 }
 
 function resetNodeResults(node) {
@@ -619,7 +575,7 @@ function renderNode(node) {
         <div class="block-side">
           <div class="block-badges">${badgesHtml}</div>
           <div class="block-actions">
-            <button class="secondary small" data-action="analyze-node" data-node-id="${node.id}" ${classifier ? "" : "disabled"}>
+            <button class="secondary small" data-action="analyze-node" data-node-id="${node.id}" ${activeBackend ? "" : "disabled"}>
               このブロックを判定
             </button>
             ${node.depth > 0 ? `
@@ -639,8 +595,8 @@ function renderNode(node) {
 function render() {
   els.treeRoot.innerHTML = renderNode(tree);
   renderReasonsPanel();
-  els.analyzeRootBtn.disabled = !classifier;
-  els.analyzeAllBtn.disabled = !classifier;
+  els.analyzeRootBtn.disabled = !activeBackend;
+  els.analyzeAllBtn.disabled = !activeBackend;
 }
 
 async function analyzeNode(node) {
@@ -665,7 +621,7 @@ async function analyzeNode(node) {
 }
 
 async function analyzeSingleNode(nodeId) {
-  if (!classifier || isChecking) return;
+  if (!activeBackend || isChecking) return;
   const node = findNodeById(tree, nodeId);
   if (!node) return;
 
@@ -674,6 +630,7 @@ async function analyzeSingleNode(nodeId) {
   els.analyzeRootBtn.disabled = true;
   els.loadBtn.disabled = true;
   els.copyMdBtn.disabled = true;
+  if (els.modelSelect) els.modelSelect.disabled = true;
 
   setProgress(`ブロック ${node.title} を判定中...`, null);
   await analyzeNode(node);
@@ -684,17 +641,19 @@ async function analyzeSingleNode(nodeId) {
   els.analyzeRootBtn.disabled = false;
   els.loadBtn.disabled = false;
   els.copyMdBtn.disabled = false;
+  if (els.modelSelect) els.modelSelect.disabled = false;
   isChecking = false;
 }
 
 async function analyzeAllNodes() {
-  if (!classifier || isChecking) return;
+  if (!activeBackend || isChecking) return;
 
   isChecking = true;
   els.analyzeAllBtn.disabled = true;
   els.analyzeRootBtn.disabled = true;
   els.loadBtn.disabled = true;
   els.copyMdBtn.disabled = true;
+  if (els.modelSelect) els.modelSelect.disabled = true;
 
   const nodes = collectNodes(tree, []);
   for (let idx = 0; idx < nodes.length; idx++) {
@@ -708,49 +667,131 @@ async function analyzeAllNodes() {
   els.analyzeRootBtn.disabled = false;
   els.loadBtn.disabled = false;
   els.copyMdBtn.disabled = false;
+  if (els.modelSelect) els.modelSelect.disabled = false;
   isChecking = false;
 }
 
 async function loadModel() {
-  if (classifier || isLoading) return;
+  if (isLoading) return;
 
   isLoading = true;
+  generator = null;
+  classifier = null;
+  activeBackend = null;
+
   els.loadBtn.disabled = true;
   els.analyzeRootBtn.disabled = true;
   els.analyzeAllBtn.disabled = true;
   els.copyMdBtn.disabled = true;
+  if (els.modelSelect) els.modelSelect.disabled = true;
 
-  setDeviceState("loading", "CPU (WASM) を使用");
-  setModelState("loading", "モデル読込中");
-  setProgress("軽量モデルを読み込んでいます...", 0);
+  const selectedKey = els.modelSelect ? els.modelSelect.value : "medium";
+  const selected = MODEL_OPTIONS[selectedKey] || MODEL_OPTIONS.medium;
+
+  setModelState("loading", `モデル読込中: ${selected.label}`);
+  setProgress("モデルを読み込んでいます...", 0);
 
   try {
-    classifier = await pipeline("zero-shot-classification", MODEL_ID, {
-      device: "wasm",
-      dtype: "q8",
-      progress_callback: (progress) => {
-        if (!progress) return;
-        const p = progress.progress ?? 0;
-        const status = progress.status ?? "loading";
-        setProgress(`読込中: ${status}`, p * 100);
-      },
-    });
+    if (selected.kind === "generator") {
+      const gpu = await detectWebGPU();
 
-    setModelState("ready", "モデル読込完了");
-    setDeviceState("ready", "CPU (WASM) で実行");
+      if (!gpu.ok) {
+        lastBackendNote = `GPU不可のためCPUへ切替: ${gpu.reason}`;
+        setDeviceState("loading", "GPU不可。CPU分類器に切替中");
+        setProgress(`GPU不可: ${gpu.reason}`, 5);
+
+        classifier = await pipeline("zero-shot-classification", MODEL_OPTIONS.cpu.model, {
+          device: MODEL_OPTIONS.cpu.device,
+          dtype: MODEL_OPTIONS.cpu.dtype,
+          progress_callback: (progress) => {
+            if (!progress) return;
+            const p = progress.progress ?? 0;
+            const status = progress.status ?? "loading";
+            setProgress(`読込中: ${status}`, p * 100);
+          },
+        });
+
+        activeBackend = MODEL_OPTIONS.cpu;
+        setModelState("ready", "GPU不可。CPU分類器で実行");
+        setDeviceState("ready", lastBackendNote);
+      } else {
+        lastBackendNote = "WebGPU 利用可能";
+        setDeviceState("loading", "WebGPU を使用");
+        generator = await pipeline("text-generation", selected.model, {
+          device: selected.device,
+          dtype: selected.dtype,
+          progress_callback: (progress) => {
+            if (!progress) return;
+            const p = progress.progress ?? 0;
+            const status = progress.status ?? "loading";
+            setProgress(`読込中: ${status}`, p * 100);
+          },
+        });
+
+        activeBackend = selected;
+        setModelState("ready", `読込完了: ${selected.label}`);
+        setDeviceState("ready", "WebGPU で実行");
+      }
+    } else {
+      classifier = await pipeline("zero-shot-classification", selected.model, {
+        device: selected.device,
+        dtype: selected.dtype,
+        progress_callback: (progress) => {
+          if (!progress) return;
+          const p = progress.progress ?? 0;
+          const status = progress.status ?? "loading";
+          setProgress(`読込中: ${status}`, p * 100);
+        },
+      });
+
+      activeBackend = selected;
+      lastBackendNote = "CPU分類器を使用";
+      setModelState("ready", `読込完了: ${selected.label}`);
+      setDeviceState("ready", "CPU (WASM) で実行");
+    }
+
     setProgress("準備完了", 100);
     els.analyzeRootBtn.disabled = false;
     els.analyzeAllBtn.disabled = false;
   } catch (err) {
     console.error(err);
-    setModelState("error", "モデル読込失敗");
-    setDeviceState("error", "推論デバイス初期化失敗");
-    setProgress("読込に失敗しました", 0);
-    alert("モデルの読み込みに失敗しました。通信環境かブラウザ設定を確認してください。");
+
+    try {
+      lastBackendNote = "主モデル失敗。CPU分類器へ切替";
+      setModelState("loading", "主モデル失敗。CPU分類器に切替中");
+      setDeviceState("loading", "CPU (WASM) に切替中");
+      setProgress("CPU 分類器を読み込んでいます...", 10);
+
+      classifier = await pipeline("zero-shot-classification", MODEL_OPTIONS.cpu.model, {
+        device: MODEL_OPTIONS.cpu.device,
+        dtype: MODEL_OPTIONS.cpu.dtype,
+        progress_callback: (progress) => {
+          if (!progress) return;
+          const p = progress.progress ?? 0;
+          const status = progress.status ?? "loading";
+          setProgress(`読込中: ${status}`, p * 100);
+        },
+      });
+
+      generator = null;
+      activeBackend = MODEL_OPTIONS.cpu;
+      setModelState("ready", "CPU分類器で実行");
+      setDeviceState("ready", "主モデル失敗。CPU (WASM) で実行");
+      setProgress("準備完了", 100);
+      els.analyzeRootBtn.disabled = false;
+      els.analyzeAllBtn.disabled = false;
+    } catch (err2) {
+      console.error(err2);
+      setModelState("error", "モデル読込失敗");
+      setDeviceState("error", "初期化失敗");
+      setProgress("読込に失敗しました", 0);
+      alert("GPU/CPU いずれのモデル読み込みにも失敗しました。");
+    }
   } finally {
     isLoading = false;
     els.loadBtn.disabled = false;
     els.copyMdBtn.disabled = false;
+    if (els.modelSelect) els.modelSelect.disabled = false;
     render();
   }
 }
@@ -759,7 +800,7 @@ function clearAll() {
   tree = createNode(0, "ルート");
   resetNodeResults(tree);
   render();
-  setProgress(classifier ? "準備完了" : "待機中", classifier ? 100 : 0);
+  setProgress(activeBackend ? "準備完了" : "待機中", activeBackend ? 100 : 0);
 }
 
 function nodeToMarkdown(node, level = 0) {
@@ -904,7 +945,7 @@ els.analyzeAllBtn.addEventListener("click", analyzeAllNodes);
 els.copyMdBtn.addEventListener("click", copyMarkdown);
 els.clearBtn.addEventListener("click", clearAll);
 
-setDeviceState("ready", "CPU (WASM) 想定");
+setDeviceState("ready", "未確認");
 setModelState("ready", "未ロード");
 setProgress("待機中", 0);
 
