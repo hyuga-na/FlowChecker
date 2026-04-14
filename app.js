@@ -1,7 +1,13 @@
 import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@next";
 
 const LINE_NAMES = ["背景", "課題", "解法", "結果", "考察"];
-const FLOW_LABELS = ["問題なし", "飛躍"];
+const CPU_FLOW_LABELS = ["問題なし", "飛躍"];
+
+const SCORE_MAP = {
+  "問題なし": 1.0,
+  "要確認": 0.5,
+  "飛躍": 0.0,
+};
 
 const MODEL_OPTIONS = {
   small: {
@@ -40,12 +46,14 @@ let activeBackend = null;
 let isLoading = false;
 let isChecking = false;
 let nodeCounter = 0;
-let lastBackendNote = "未ロード";
+
+const CPU_BORDER_MARGIN = 0.18;
 
 function createEmptyResults() {
   return [
     {
       label: "問題なし",
+      score: 1.0,
       reason: "1行目は比較対象がないため固定で問題なしです。",
       scoreText: "固定判定",
       relation: "比較対象なし",
@@ -53,6 +61,7 @@ function createEmptyResults() {
     },
     {
       label: "未判定",
+      score: null,
       reason: "",
       scoreText: "",
       relation: "背景 → 課題",
@@ -60,6 +69,7 @@ function createEmptyResults() {
     },
     {
       label: "未判定",
+      score: null,
       reason: "",
       scoreText: "",
       relation: "課題 → 解法",
@@ -67,6 +77,7 @@ function createEmptyResults() {
     },
     {
       label: "未判定",
+      score: null,
       reason: "",
       scoreText: "",
       relation: "解法 → 結果",
@@ -74,6 +85,7 @@ function createEmptyResults() {
     },
     {
       label: "未判定",
+      score: null,
       reason: "",
       scoreText: "",
       relation: "結果 → 考察",
@@ -150,6 +162,8 @@ function badgeClass(label) {
       return "badge-problem-none";
     case "飛躍":
       return "badge-jump";
+    case "要確認":
+      return "badge-wait";
     default:
       return "badge-wait";
   }
@@ -160,7 +174,16 @@ function countNonEmptyLines(node) {
 }
 
 function shortLabel(label) {
-  return label === "飛躍" ? "飛躍" : label === "問題なし" ? "問題なし" : "未判定";
+  switch (label) {
+    case "問題なし":
+      return "問題なし";
+    case "飛躍":
+      return "飛躍";
+    case "要確認":
+      return "要確認";
+    default:
+      return "未判定";
+  }
 }
 
 function summarizeNodeLines(node) {
@@ -194,7 +217,6 @@ function getAncestorContext(node, maxDepth = 1) {
     current = current.parent;
     depth += 1;
   }
-
   return contexts.join("\n\n");
 }
 
@@ -208,7 +230,7 @@ function buildGenerationPrompt(node, prevIndex, currIndex, prevText, currText) {
       : "This is the top-level block.";
 
   return [
-    "You check whether the transition between two adjacent lines in a research outline is natural.",
+    "You evaluate the transition between two adjacent lines in a research outline.",
     "Judge only the flow from the previous line to the next line.",
     "Do not rely only on topic similarity. Focus on research-structure transition.",
     "",
@@ -222,8 +244,13 @@ function buildGenerationPrompt(node, prevIndex, currIndex, prevText, currText) {
     `Previous line: ${prevText}`,
     `Next line: ${currText}`,
     "",
+    "Use exactly one of these bands:",
+    "GOOD = natural transition",
+    "BORDER = somewhat weak or underspecified transition",
+    "BAD = clear jump or unnatural transition",
+    "",
     "Return JSON only.",
-    `{"label":"PROBLEM_OK or JUMP","reason":"short Japanese sentence"}`,
+    `{"band":"GOOD or BORDER or BAD","reason":"short Japanese sentence"}`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -259,63 +286,6 @@ function buildClassifierPrompt(node, prevIndex, currIndex, prevText, currText) {
     .join("\n");
 }
 
-function getHeuristicFlowLabel(prevIndex, currIndex, prevText, currText) {
-  const prev = prevText.trim();
-  const curr = currText.trim();
-
-  if (!prev || !curr) return "問題なし";
-
-  const currHasMethod =
-    curr.includes("提案") ||
-    curr.includes("手法") ||
-    curr.includes("FiLM") ||
-    curr.includes("用いる") ||
-    curr.includes("注入") ||
-    curr.includes("モデル") ||
-    curr.includes("分離する");
-
-  const currHasResult =
-    curr.includes("結果") ||
-    curr.includes("性能") ||
-    curr.includes("向上") ||
-    curr.includes("改善") ||
-    curr.includes("実験") ||
-    curr.includes("評価") ||
-    curr.includes("精度") ||
-    curr.includes("示した");
-
-  const currHasDiscussion =
-    curr.includes("有効") ||
-    curr.includes("可能性") ||
-    curr.includes("示唆") ||
-    curr.includes("考えられる") ||
-    curr.includes("解釈");
-
-  const currHasProblem =
-    curr.includes("課題") ||
-    curr.includes("問題") ||
-    curr.includes("必要") ||
-    curr.includes("困難") ||
-    curr.includes("不足") ||
-    curr.includes("未解決") ||
-    curr.includes("ショートカット");
-
-  if (prevIndex === 0 && currIndex === 1) {
-    if (currHasMethod || currHasResult || currHasDiscussion) return "飛躍";
-    return currHasProblem ? "問題なし" : "飛躍";
-  }
-  if (prevIndex === 1 && currIndex === 2) {
-    return currHasMethod ? "問題なし" : "飛躍";
-  }
-  if (prevIndex === 2 && currIndex === 3) {
-    return currHasResult ? "問題なし" : "飛躍";
-  }
-  if (prevIndex === 3 && currIndex === 4) {
-    return currHasDiscussion ? "問題なし" : "飛躍";
-  }
-  return "飛躍";
-}
-
 function buildReason(lineIndex, label, prevText, currText, extra = "") {
   const currRole = LINE_NAMES[lineIndex];
   const prevRole = lineIndex > 0 ? LINE_NAMES[lineIndex - 1] : null;
@@ -332,7 +302,44 @@ function buildReason(lineIndex, label, prevText, currText, extra = "") {
   if (label === "飛躍") {
     return `${prevRole}から${currRole}への遷移が不自然です。${extra}`.trim();
   }
+  if (label === "要確認") {
+    return `${prevRole}から${currRole}への接続は弱い、または判断が難しいです。${extra}`.trim();
+  }
   return `${prevRole}から${currRole}への接続は自然です。${extra}`.trim();
+}
+
+function labelToScore(label) {
+  return SCORE_MAP[label] ?? null;
+}
+
+function scoreToPercent(score) {
+  if (score == null) return null;
+  return Math.round(score * 100);
+}
+
+function computeNodeScore(node) {
+  const vals = node.results
+    .filter((r) => typeof r.score === "number")
+    .map((r) => r.score);
+  if (vals.length === 0) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+function computeTreeScore(node) {
+  const vals = [];
+
+  function walk(n) {
+    for (const r of n.results) {
+      if (typeof r.score === "number") vals.push(r.score);
+    }
+    for (const c of n.children) {
+      if (c) walk(c);
+    }
+  }
+
+  walk(node);
+  if (vals.length === 0) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
 
 function extractJsonObject(text) {
@@ -367,7 +374,7 @@ async function detectWebGPU() {
 async function runGeneratorJudge(node, prevIndex, currIndex, prevText, currText) {
   const prompt = buildGenerationPrompt(node, prevIndex, currIndex, prevText, currText);
   const out = await generator(prompt, {
-    max_new_tokens: 80,
+    max_new_tokens: 100,
     do_sample: false,
     temperature: 0,
     return_full_text: false,
@@ -380,12 +387,18 @@ async function runGeneratorJudge(node, prevIndex, currIndex, prevText, currText)
     throw new Error("生成結果の JSON 解析に失敗しました");
   }
 
-  const rawLabel = String(parsed.label || "").trim().toUpperCase();
-  const label = rawLabel === "JUMP" ? "飛躍" : "問題なし";
-  const reason = String(parsed.reason || "").trim() || buildReason(currIndex, label, prevText, currText);
+  const rawBand = String(parsed.band || "").trim().toUpperCase();
+  let label = "要確認";
+  if (rawBand === "GOOD") label = "問題なし";
+  if (rawBand === "BAD") label = "飛躍";
+
+  const reason =
+    String(parsed.reason || "").trim() ||
+    buildReason(currIndex, label, prevText, currText);
 
   return {
     label,
+    score: labelToScore(label),
     reason,
     scoreText: "generator",
   };
@@ -393,7 +406,7 @@ async function runGeneratorJudge(node, prevIndex, currIndex, prevText, currText)
 
 async function runClassifierJudge(node, prevIndex, currIndex, prevText, currText) {
   const sequence = buildClassifierPrompt(node, prevIndex, currIndex, prevText, currText);
-  const output = await classifier(sequence, FLOW_LABELS, {
+  const output = await classifier(sequence, CPU_FLOW_LABELS, {
     multi_label: false,
     hypothesis_template: "この接続は {}。",
   });
@@ -401,12 +414,26 @@ async function runClassifierJudge(node, prevIndex, currIndex, prevText, currText
   const labels = Array.isArray(output.labels) ? output.labels : [];
   const scores = Array.isArray(output.scores) ? output.scores : [];
   const topLabel = labels[0] || "飛躍";
-  const topScore = typeof scores[0] === "number" ? scores[0] : null;
+  const topScore = typeof scores[0] === "number" ? scores[0] : 0;
+  const secondScore = typeof scores[1] === "number" ? scores[1] : 0;
+  const margin = Math.abs(topScore - secondScore);
+
+  let label = CPU_FLOW_LABELS.includes(topLabel) ? topLabel : "飛躍";
+  if (margin < CPU_BORDER_MARGIN) {
+    label = "要確認";
+  }
 
   return {
-    label: FLOW_LABELS.includes(topLabel) ? topLabel : "飛躍",
-    reason: buildReason(currIndex, FLOW_LABELS.includes(topLabel) ? topLabel : "飛躍", prevText, currText),
-    scoreText: topScore == null ? "classifier" : `classifier score=${topScore.toFixed(3)}`,
+    label,
+    score: labelToScore(label),
+    reason: buildReason(
+      currIndex,
+      label,
+      prevText,
+      currText,
+      label === "要確認" ? "分類スコア差が小さいため、境界的とみなしました。" : ""
+    ),
+    scoreText: `classifier top=${topScore.toFixed(3)}, margin=${margin.toFixed(3)}`,
   };
 }
 
@@ -414,6 +441,7 @@ async function classifyFlow(node, prevIndex, currIndex, prevText, currText) {
   if (!prevText.trim() || !currText.trim()) {
     return {
       label: "問題なし",
+      score: 1.0,
       reason: buildReason(currIndex, "問題なし", prevText, currText),
       scoreText: "空欄を含むため問題なし扱い",
     };
@@ -427,14 +455,14 @@ async function classifyFlow(node, prevIndex, currIndex, prevText, currText) {
       return await runClassifierJudge(node, prevIndex, currIndex, prevText, currText);
     }
   } catch (e) {
-    console.warn("モデル推論失敗。ヒューリスティックへフォールバック:", e);
+    console.warn("モデル推論失敗:", e);
   }
 
-  const label = getHeuristicFlowLabel(prevIndex, currIndex, prevText, currText);
   return {
-    label,
-    reason: buildReason(currIndex, label, prevText, currText),
-    scoreText: "heuristic fallback",
+    label: "要確認",
+    score: 0.5,
+    reason: buildReason(currIndex, "要確認", prevText, currText, "モデル推論に失敗したため判定を保留しました。"),
+    scoreText: "model error",
   };
 }
 
@@ -468,12 +496,9 @@ function ensureChild(node, lineIndex) {
 
 function collapseChildrenRecursively(node) {
   node.expanded = [false, false, false, false, false];
-
-  for (let i = 0; i < node.children.length; i++) {
-    const child = node.children[i];
+  for (const child of node.children) {
     if (child) {
       collapseChildrenRecursively(child);
-      node.expanded[i] = false; // ← 明示的に閉じる
     }
   }
 }
@@ -497,6 +522,7 @@ function collectReasonItems(node, path = "ルート", items = []) {
       relation: res.relation || (i === 0 ? "比較対象なし" : `${LINE_NAMES[i - 1]} → ${LINE_NAMES[i]}`),
       reason: res.reason || "",
       scoreText: res.scoreText || "",
+      score: res.score,
     });
   });
 
@@ -509,24 +535,55 @@ function collectReasonItems(node, path = "ルート", items = []) {
 }
 
 function renderReasonsPanel() {
+  const overallScore = computeTreeScore(tree);
   const items = collectReasonItems(tree);
 
+  let html = `
+    <div class="reason-item">
+      <div class="reason-head">
+        <div class="reason-title">全体スコア</div>
+        <span class="line-badge ${badgeClass(
+          overallScore == null
+            ? "要確認"
+            : overallScore >= 0.75
+              ? "問題なし"
+              : overallScore >= 0.4
+                ? "要確認"
+                : "飛躍"
+        )}">
+          ${overallScore == null ? "未計算" : `${scoreToPercent(overallScore)}点`}
+        </span>
+      </div>
+      <div class="reason-body">現在ロード中の判定系: ${escapeHtml(activeBackend ? activeBackend.label : "未ロード")}</div>
+      <div class="reason-meta">${
+        overallScore == null
+          ? "まだスコアがありません。"
+          : `平均スコア=${overallScore.toFixed(3)}`
+      }</div>
+    </div>
+  `;
+
   if (items.length === 0) {
-    els.reasonsRoot.innerHTML = `<div class="empty-reasons">まだ判定結果がありません。</div>`;
+    html += `<div class="empty-reasons">まだ判定結果がありません。</div>`;
+    els.reasonsRoot.innerHTML = html;
     return;
   }
 
-  els.reasonsRoot.innerHTML = items.map((item) => `
+  html += items.map((item) => `
     <div class="reason-item">
       <div class="reason-head">
         <div class="reason-title">${escapeHtml(item.path)} / ${item.lineIndex}行目（${item.lineName}）</div>
-        <span class="line-badge ${badgeClass(item.label)}">${escapeHtml(item.label)}</span>
+        <span class="line-badge ${badgeClass(item.label)}">
+          ${escapeHtml(item.label)}${typeof item.score === "number" ? ` (${scoreToPercent(item.score)}点)` : ""}
+        </span>
       </div>
       <div class="reason-body">${escapeHtml(item.relation)}
 ${escapeHtml(item.reason)}</div>
       <div class="reason-meta">${escapeHtml(item.scoreText)}</div>
     </div>
   `).join("");
+
+  els.reasonsRoot.innerHTML = html;
 }
 
 function renderNode(node) {
@@ -569,12 +626,17 @@ function renderNode(node) {
     </span>
   `).join("");
 
+  const nodeScore = computeNodeScore(node);
+
   return `
     <section class="block depth-${Math.min(node.depth, 5)}">
       <div class="block-header">
         <div class="block-title-wrap">
           <div class="block-title">${escapeHtml(node.title)}</div>
-          <div class="block-meta">深さ ${node.depth} / 入力済み ${countNonEmptyLines(node)} 行 / ID ${escapeHtml(node.id)}</div>
+          <div class="block-meta">
+            深さ ${node.depth} / 入力済み ${countNonEmptyLines(node)} 行 / ID ${escapeHtml(node.id)}
+            ${nodeScore == null ? "" : ` / スコア ${scoreToPercent(nodeScore)}点`}
+          </div>
         </div>
 
         <div class="block-side">
@@ -607,6 +669,7 @@ function render() {
 async function analyzeNode(node) {
   node.results[0] = {
     label: "問題なし",
+    score: 1.0,
     reason: "1行目は比較対象がないため固定で問題なしです。",
     scoreText: "固定判定",
     relation: "比較対象なし",
@@ -617,6 +680,7 @@ async function analyzeNode(node) {
     const flowResult = await classifyFlow(node, i - 1, i, node.lines[i - 1], node.lines[i]);
     node.results[i] = {
       label: flowResult.label,
+      score: flowResult.score,
       reason: flowResult.reason,
       scoreText: flowResult.scoreText,
       relation: `${LINE_NAMES[i - 1]} → ${LINE_NAMES[i]}`,
@@ -725,7 +789,6 @@ async function loadModel() {
       setDeviceState("ready", "WebGPU で実行");
     } else {
       setDeviceState("loading", "CPU (WASM) を使用");
-
       classifier = await pipeline("zero-shot-classification", selected.model, {
         device: selected.device,
         dtype: selected.dtype,
@@ -901,11 +964,9 @@ els.treeRoot.addEventListener("click", async (event) => {
   if (action === "collapse-all-children") {
     if (!node) return;
     collapseChildrenRecursively(node);
-
     if (node.parent && node.parentLineIndex !== null) {
       node.parent.expanded[node.parentLineIndex] = false;
     }
-    
     render();
   }
 });
