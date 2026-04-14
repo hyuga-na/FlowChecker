@@ -1,6 +1,6 @@
 import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.0";
 
-const MODEL_ID = "Xenova/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7";
+const MODEL_ID = "xavierbarbier/xlm-roberta-large-xnli";
 const LINE_NAMES = ["背景", "課題", "解法", "結果", "考察"];
 const LABELS = ["問題なし", "飛躍", "不足", "未定義", "過剰"];
 
@@ -702,6 +702,40 @@ function clearAll() {
   setProgress(classifier ? "準備完了" : "待機中", classifier ? 100 : 0);
 }
 
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "fixed";
+  textArea.style.top = "-9999px";
+  textArea.style.left = "-9999px";
+  document.body.appendChild(textArea);
+
+  const selection = document.getSelection();
+  const originalRange =
+    selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+
+  textArea.focus();
+  textArea.select();
+
+  const successful = document.execCommand("copy");
+  document.body.removeChild(textArea);
+
+  if (originalRange && selection) {
+    selection.removeAllRanges();
+    selection.addRange(originalRange);
+  }
+
+  if (!successful) {
+    throw new Error("execCommand copy failed");
+  }
+}
+
 function nodeToMarkdown(node, level = 0) {
   const indent = "  ".repeat(level);
   const lines = [];
@@ -728,12 +762,21 @@ async function copyMarkdown() {
     return;
   }
 
+  els.copyMdBtn.disabled = true;
+  const originalText = els.copyMdBtn.textContent;
+
   try {
-    await navigator.clipboard.writeText(md);
-    setProgress("Markdownをコピーしました", 100);
+    await copyTextToClipboard(md);
+    els.copyMdBtn.textContent = "コピーしました";
+    setProgress("Markdownをクリップボードへ保存しました", 100);
   } catch (e) {
     console.error(e);
-    alert("クリップボードへのコピーに失敗しました。");
+    alert("クリップボードへの保存に失敗しました。HTTPSで開いているか、ブラウザの権限設定を確認してください。");
+  } finally {
+    setTimeout(() => {
+      els.copyMdBtn.textContent = originalText;
+      els.copyMdBtn.disabled = false;
+    }, 1200);
   }
 }
 
