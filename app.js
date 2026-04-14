@@ -696,43 +696,31 @@ async function loadModel() {
       const gpu = await detectWebGPU();
 
       if (!gpu.ok) {
-        lastBackendNote = `GPU不可のためCPUへ切替: ${gpu.reason}`;
-        setDeviceState("loading", "GPU不可。CPU分類器に切替中");
-        setProgress(`GPU不可: ${gpu.reason}`, 5);
-
-        classifier = await pipeline("zero-shot-classification", MODEL_OPTIONS.cpu.model, {
-          device: MODEL_OPTIONS.cpu.device,
-          dtype: MODEL_OPTIONS.cpu.dtype,
-          progress_callback: (progress) => {
-            if (!progress) return;
-            const p = progress.progress ?? 0;
-            const status = progress.status ?? "loading";
-            setProgress(`読込中: ${status}`, p * 100);
-          },
-        });
-
-        activeBackend = MODEL_OPTIONS.cpu;
-        setModelState("ready", "GPU不可。CPU分類器で実行");
-        setDeviceState("ready", lastBackendNote);
-      } else {
-        lastBackendNote = "WebGPU 利用可能";
-        setDeviceState("loading", "WebGPU を使用");
-        generator = await pipeline("text-generation", selected.model, {
-          device: selected.device,
-          dtype: selected.dtype,
-          progress_callback: (progress) => {
-            if (!progress) return;
-            const p = progress.progress ?? 0;
-            const status = progress.status ?? "loading";
-            setProgress(`読込中: ${status}`, p * 100);
-          },
-        });
-
-        activeBackend = selected;
-        setModelState("ready", `読込完了: ${selected.label}`);
-        setDeviceState("ready", "WebGPU で実行");
+        setModelState("error", `GPUモデル読込失敗: ${selected.label}`);
+        setDeviceState("error", `WebGPU 使用不可: ${gpu.reason}`);
+        setProgress("GPUが使用できないため停止しました", 0);
+        alert(`GPUモデルを選択しましたが、WebGPUが使用できませんでした。\n理由: ${gpu.reason}`);
+        return;
       }
+
+      setDeviceState("loading", "WebGPU を使用");
+      generator = await pipeline("text-generation", selected.model, {
+        device: selected.device,
+        dtype: selected.dtype,
+        progress_callback: (progress) => {
+          if (!progress) return;
+          const p = progress.progress ?? 0;
+          const status = progress.status ?? "loading";
+          setProgress(`読込中: ${status}`, p * 100);
+        },
+      });
+
+      activeBackend = selected;
+      setModelState("ready", `読込完了: ${selected.label}`);
+      setDeviceState("ready", "WebGPU で実行");
     } else {
+      setDeviceState("loading", "CPU (WASM) を使用");
+
       classifier = await pipeline("zero-shot-classification", selected.model, {
         device: selected.device,
         dtype: selected.dtype,
@@ -745,7 +733,6 @@ async function loadModel() {
       });
 
       activeBackend = selected;
-      lastBackendNote = "CPU分類器を使用";
       setModelState("ready", `読込完了: ${selected.label}`);
       setDeviceState("ready", "CPU (WASM) で実行");
     }
@@ -755,38 +742,14 @@ async function loadModel() {
     els.analyzeAllBtn.disabled = false;
   } catch (err) {
     console.error(err);
+    activeBackend = null;
+    generator = null;
+    classifier = null;
 
-    try {
-      lastBackendNote = "主モデル失敗。CPU分類器へ切替";
-      setModelState("loading", "主モデル失敗。CPU分類器に切替中");
-      setDeviceState("loading", "CPU (WASM) に切替中");
-      setProgress("CPU 分類器を読み込んでいます...", 10);
-
-      classifier = await pipeline("zero-shot-classification", MODEL_OPTIONS.cpu.model, {
-        device: MODEL_OPTIONS.cpu.device,
-        dtype: MODEL_OPTIONS.cpu.dtype,
-        progress_callback: (progress) => {
-          if (!progress) return;
-          const p = progress.progress ?? 0;
-          const status = progress.status ?? "loading";
-          setProgress(`読込中: ${status}`, p * 100);
-        },
-      });
-
-      generator = null;
-      activeBackend = MODEL_OPTIONS.cpu;
-      setModelState("ready", "CPU分類器で実行");
-      setDeviceState("ready", "主モデル失敗。CPU (WASM) で実行");
-      setProgress("準備完了", 100);
-      els.analyzeRootBtn.disabled = false;
-      els.analyzeAllBtn.disabled = false;
-    } catch (err2) {
-      console.error(err2);
-      setModelState("error", "モデル読込失敗");
-      setDeviceState("error", "初期化失敗");
-      setProgress("読込に失敗しました", 0);
-      alert("GPU/CPU いずれのモデル読み込みにも失敗しました。");
-    }
+    setModelState("error", `モデル読込失敗: ${selected.label}`);
+    setDeviceState("error", selected.kind === "generator" ? "WebGPU 初期化またはモデル読込失敗" : "CPU分類器の読込失敗");
+    setProgress("読込に失敗しました", 0);
+    alert(`モデルの読み込みに失敗しました。\n選択モデル: ${selected.label}`);
   } finally {
     isLoading = false;
     els.loadBtn.disabled = false;
