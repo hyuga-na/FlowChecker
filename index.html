@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FlowChecker</title>
+  <title>FlowChecker Fractal</title>
   <style>
     :root {
       --bg: #f6f7fb;
@@ -47,7 +47,7 @@
     }
 
     .page {
-      max-width: 1200px;
+      max-width: 1400px;
       margin: 0 auto;
       padding: 24px;
     }
@@ -104,65 +104,11 @@
     .dot.loading { background: #f59e0b; }
     .dot.error { background: #ef4444; }
 
-    .layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-    }
-
-    @media (max-width: 900px) {
-      .layout {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 18px;
-      box-shadow: var(--shadow);
-    }
-
-    .panel h2 {
-      margin: 0 0 16px;
-      font-size: 20px;
-    }
-
-    .field {
-      margin-bottom: 14px;
-    }
-
-    .field label {
-      display: block;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-
-    .field textarea {
-      width: 100%;
-      min-height: 76px;
-      resize: vertical;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 12px;
-      font-size: 15px;
-      line-height: 1.6;
-      background: #fff;
-      color: var(--text);
-    }
-
-    .field textarea:focus {
-      outline: none;
-      border-color: #93c5fd;
-      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.10);
-    }
-
-    .buttons {
+    .top-buttons {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
-      margin-top: 8px;
+      margin-bottom: 16px;
     }
 
     button {
@@ -189,20 +135,166 @@
       color: #374151;
     }
 
+    button.small {
+      padding: 6px 10px;
+      font-size: 12px;
+      border-radius: 10px;
+    }
+
     button:disabled {
       opacity: 0.6;
       cursor: not-allowed;
     }
 
-    .results {
+    .progress-wrap {
+      margin-bottom: 24px;
+    }
+
+    .progress-label {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 10px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #e5e7eb;
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      transition: width 0.2s ease;
+    }
+
+    .tree-root {
       display: grid;
+      gap: 18px;
+    }
+
+    .block {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .block.depth-0 {
+      border-left: 6px solid #2563eb;
+    }
+
+    .block.depth-1 {
+      border-left: 6px solid #7c3aed;
+      margin-left: 20px;
+    }
+
+    .block.depth-2 {
+      border-left: 6px solid #059669;
+      margin-left: 40px;
+    }
+
+    .block.depth-3,
+    .block.depth-4,
+    .block.depth-5 {
+      border-left: 6px solid #ea580c;
+      margin-left: 60px;
+    }
+
+    .block-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
       gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .block-title {
+      font-weight: 700;
+      font-size: 18px;
+    }
+
+    .block-meta {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .block-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .line-row {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      margin-bottom: 12px;
+      background: #fff;
+    }
+
+    .line-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .line-top {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .line-label {
+      font-weight: 700;
+      font-size: 15px;
+    }
+
+    .line-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 72px;
+      resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 15px;
+      line-height: 1.6;
+      background: #fff;
+      color: var(--text);
+    }
+
+    textarea:focus {
+      outline: none;
+      border-color: #93c5fd;
+      box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.10);
+    }
+
+    .child-wrap {
+      margin-top: 12px;
+    }
+
+    .result-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
     }
 
     .result-card {
       border: 1px solid var(--border);
       border-radius: 14px;
-      padding: 14px;
+      padding: 12px;
       background: #fff;
     }
 
@@ -210,19 +302,20 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 10px;
+      gap: 10px;
+      margin-bottom: 8px;
     }
 
     .result-title {
       font-weight: 700;
+      font-size: 14px;
     }
 
     .badge {
       display: inline-block;
       padding: 6px 10px;
       border-radius: 999px;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 700;
       white-space: nowrap;
     }
@@ -261,68 +354,39 @@
       font-size: 12px;
       font-weight: 700;
       color: var(--muted);
-      margin: 12px 0 6px;
-      letter-spacing: 0.02em;
+      margin: 8px 0 4px;
     }
 
-    .pair, .reason, .score {
-      font-size: 14px;
-      color: var(--text);
+    .result-body,
+    .reason,
+    .meta {
+      font-size: 13px;
       line-height: 1.7;
       white-space: pre-wrap;
       word-break: break-word;
     }
 
     .meta {
-      font-size: 13px;
       color: var(--muted);
-      line-height: 1.6;
     }
 
     .footer-note {
-      margin-top: 16px;
+      margin-top: 18px;
       font-size: 13px;
       color: var(--muted);
       line-height: 1.7;
-    }
-
-    .progress-wrap {
-      margin-top: 10px;
-    }
-
-    .progress-label {
-      font-size: 13px;
-      color: var(--muted);
-      margin-bottom: 6px;
-    }
-
-    .progress-bar {
-      width: 100%;
-      height: 10px;
-      border-radius: 999px;
-      overflow: hidden;
-      background: #e5e7eb;
-    }
-
-    .progress-fill {
-      height: 100%;
-      width: 0%;
-      background: var(--accent);
-      transition: width 0.2s ease;
     }
   </style>
 </head>
 <body>
   <div class="page">
-    <h1>FlowChecker</h1>
+    <h1>FlowChecker Fractal</h1>
     <p class="subtitle">
-      5行の研究ロジックを入力し、各行が直前の行から自然につながっているかを
-      ブラウザ内モデルで判定します。
+      5行ロジックを再帰的に分解しながら記述し、各ブロックごとに論理接続を判定します。
     </p>
 
     <div class="notice">
-      初回のみモデル読み込みに時間がかかります。<br>
-      WebGPU が利用可能なら自動で優先し、使えない場合は CPU で実行します。
+      各行には詳細ブロックをぶら下げられます。親行は粗い粒度、子ブロックはその行の内訳を書く想定です。
     </div>
 
     <div class="status-bar">
@@ -339,61 +403,25 @@
       </div>
     </div>
 
-    <div class="layout">
-      <section class="panel">
-        <h2>入力</h2>
+    <div class="top-buttons">
+      <button id="load-btn" class="secondary">モデルを読み込む</button>
+      <button id="analyze-root-btn" class="primary" disabled>ルートブロックを判定</button>
+      <button id="analyze-all-btn" class="primary" disabled>全ブロックを判定</button>
+      <button id="clear-btn" class="ghost">全体をクリア</button>
+    </div>
 
-        <div class="field">
-          <label for="l1">1. 背景</label>
-          <textarea id="l1"></textarea>
-        </div>
+    <div class="progress-wrap">
+      <div class="progress-label">処理状況</div>
+      <div class="progress-bar">
+        <div id="progress-fill" class="progress-fill"></div>
+      </div>
+    </div>
 
-        <div class="field">
-          <label for="l2">2. 課題</label>
-          <textarea id="l2"></textarea>
-        </div>
+    <div id="tree-root" class="tree-root"></div>
 
-        <div class="field">
-          <label for="l3">3. 解法</label>
-          <textarea id="l3"></textarea>
-        </div>
-
-        <div class="field">
-          <label for="l4">4. 結果</label>
-          <textarea id="l4"></textarea>
-        </div>
-
-        <div class="field">
-          <label for="l5">5. 考察</label>
-          <textarea id="l5"></textarea>
-        </div>
-
-        <div class="buttons">
-          <button id="load-btn" class="secondary">モデルを読み込む</button>
-          <button id="check-btn" class="primary" disabled>チェック</button>
-          <button id="clear-btn" class="ghost">クリア</button>
-        </div>
-
-        <div class="progress-wrap">
-          <div class="progress-label">モデル読み込み状況</div>
-          <div class="progress-bar">
-            <div id="progress-fill" class="progress-fill"></div>
-          </div>
-        </div>
-
-        <div class="footer-note">
-          判定ラベルは「問題なし / 飛躍 / 不足 / 未定義 / 過剰」です。<br>
-          1行目は比較対象がないため固定で「問題なし」です。
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>結果</h2>
-        <div id="results" class="results"></div>
-        <div class="footer-note">
-          2〜5行目はそれぞれ 1→2, 2→3, 3→4, 4→5 の接続を判定します。
-        </div>
-      </section>
+    <div class="footer-note">
+      各ブロックの判定は「背景→課題→解法→結果→考察」の接続で評価します。
+      ある行の詳細を記述したい場合は、その行の「詳細を開く」を使ってください。
     </div>
   </div>
 
@@ -408,10 +436,36 @@
     let selectedDevice = "wasm";
     let isLoading = false;
     let isChecking = false;
+    let nodeCounter = 0;
+
+    function createEmptyResults() {
+      return [
+        { label: "問題なし", reason: "1行目は比較対象がないため固定で問題なしです。", scoreText: "固定判定", relation: "比較対象なし" },
+        { label: "未判定", reason: "まだ判定していません。", scoreText: "未判定", relation: "背景 → 課題" },
+        { label: "未判定", reason: "まだ判定していません。", scoreText: "未判定", relation: "課題 → 解法" },
+        { label: "未判定", reason: "まだ判定していません。", scoreText: "未判定", relation: "解法 → 結果" },
+        { label: "未判定", reason: "まだ判定していません。", scoreText: "未判定", relation: "結果 → 考察" },
+      ];
+    }
+
+    function createNode(depth = 0, title = "ルート") {
+      return {
+        id: `node-${++nodeCounter}`,
+        depth,
+        title,
+        lines: ["", "", "", "", ""],
+        children: [null, null, null, null, null],
+        expanded: [false, false, false, false, false],
+        results: createEmptyResults(),
+      };
+    }
+
+    let tree = createNode(0, "ルート");
 
     const els = {
       loadBtn: document.getElementById("load-btn"),
-      checkBtn: document.getElementById("check-btn"),
+      analyzeRootBtn: document.getElementById("analyze-root-btn"),
+      analyzeAllBtn: document.getElementById("analyze-all-btn"),
       clearBtn: document.getElementById("clear-btn"),
       modelStatus: document.getElementById("model-status"),
       modelDot: document.getElementById("model-dot"),
@@ -419,12 +473,7 @@
       deviceDot: document.getElementById("device-dot"),
       progressText: document.getElementById("progress-text"),
       progressFill: document.getElementById("progress-fill"),
-      results: document.getElementById("results"),
-      l1: document.getElementById("l1"),
-      l2: document.getElementById("l2"),
-      l3: document.getElementById("l3"),
-      l4: document.getElementById("l4"),
-      l5: document.getElementById("l5"),
+      treeRoot: document.getElementById("tree-root"),
     };
 
     function supportsWebGPU() {
@@ -451,16 +500,6 @@
       }
     }
 
-    function getLines() {
-      return [
-        els.l1.value.trim(),
-        els.l2.value.trim(),
-        els.l3.value.trim(),
-        els.l4.value.trim(),
-        els.l5.value.trim(),
-      ];
-    }
-
     function escapeHtml(str) {
       return String(str)
         .replaceAll("&", "&amp;")
@@ -479,6 +518,10 @@
         case "過剰": return "excess";
         default: return "wait";
       }
+    }
+
+    function countNonEmptyLines(node) {
+      return node.lines.filter(v => v.trim()).length;
     }
 
     function relationName(index) {
@@ -619,79 +662,248 @@
 
       return {
         label,
-        scoreText: `overlap=${f.overlap}, method=${f.hasMethodWord}, result=${f.hasResultWord}, discussion=${f.hasDiscussionWord}, newTerms=${f.introducesNewTerms}, strongClaim=${f.strongClaim}`
+        scoreText: `fallback: overlap=${f.overlap}, method=${f.hasMethodWord}, result=${f.hasResultWord}, discussion=${f.hasDiscussionWord}, newTerms=${f.introducesNewTerms}, strongClaim=${f.strongClaim}`
       };
     }
 
-    function renderInitialResults() {
-      const lines = getLines();
+    async function classifyPair(prevIndex, currIndex, prevText, currText) {
+      const relation = `${LINE_NAMES[prevIndex]} → ${LINE_NAMES[currIndex]}`;
 
-      const cards = [];
-      for (let i = 0; i < 5; i++) {
-        const label = i === 0 ? "問題なし" : "未判定";
-        const reason = i === 0
-          ? "1行目は比較対象がないため固定で問題なしです。"
-          : "まだ判定していません。";
+      if (!prevText || !currText || !classifier) {
+        const fallback = heuristicClassify(prevText, currText, prevIndex, currIndex);
+        return {
+          label: fallback.label,
+          reason: lineSpecificReason(fallback.label, LINE_NAMES[prevIndex], LINE_NAMES[currIndex], prevText, currText),
+          relation,
+          scoreText: fallback.scoreText,
+        };
+      }
 
-        const prev = i === 0 ? "" : lines[i - 1];
-        const curr = lines[i];
+      const sequence = buildPrompt(
+        LINE_NAMES[prevIndex],
+        LINE_NAMES[currIndex],
+        prevText,
+        currText
+      );
 
-        cards.push(`
+      try {
+        const output = await classifier(sequence, LABELS, {
+          multi_label: false,
+          hypothesis_template: "この接続の判定は {}。"
+        });
+
+        const labels = Array.isArray(output.labels) ? output.labels : [];
+        const scores = Array.isArray(output.scores) ? output.scores : [];
+        const topLabel = labels[0] || "飛躍";
+        const topScore = typeof scores[0] === "number" ? scores[0] : null;
+        const safeLabel = LABELS.includes(topLabel) ? topLabel : "飛躍";
+
+        return {
+          label: safeLabel,
+          reason: lineSpecificReason(safeLabel, LINE_NAMES[prevIndex], LINE_NAMES[currIndex], prevText, currText),
+          relation,
+          scoreText: topScore === null ? "model score unavailable" : `model score=${topScore.toFixed(3)}`,
+        };
+      } catch (e) {
+        const fallback = heuristicClassify(prevText, currText, prevIndex, currIndex);
+        return {
+          label: fallback.label,
+          reason: lineSpecificReason(fallback.label, LINE_NAMES[prevIndex], LINE_NAMES[currIndex], prevText, currText),
+          relation,
+          scoreText: `fallback after error: ${fallback.scoreText}`,
+        };
+      }
+    }
+
+    function resetNodeResults(node) {
+      node.results = createEmptyResults();
+      for (const child of node.children) {
+        if (child) resetNodeResults(child);
+      }
+    }
+
+    function findNodeById(node, id) {
+      if (node.id === id) return node;
+      for (const child of node.children) {
+        if (!child) continue;
+        const found = findNodeById(child, id);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    function renderNode(node) {
+      const linesHtml = node.lines.map((line, i) => {
+        const child = node.children[i];
+        const hasChild = !!child;
+        const isExpanded = !!node.expanded[i];
+        const detailLabel = hasChild ? (isExpanded ? "詳細を閉じる" : "詳細を開く") : "詳細を作成";
+
+        return `
+          <div class="line-row">
+            <div class="line-top">
+              <div class="line-label">${i + 1}. ${LINE_NAMES[i]}</div>
+              <div class="line-controls">
+                <button class="ghost small" data-action="toggle-child" data-node-id="${node.id}" data-line-index="${i}" ${!line.trim() && !hasChild ? "disabled" : ""}>
+                  ${escapeHtml(detailLabel)}
+                </button>
+                ${hasChild ? `
+                  <button class="ghost small" data-action="remove-child" data-node-id="${node.id}" data-line-index="${i}">
+                    詳細を削除
+                  </button>
+                ` : ""}
+              </div>
+            </div>
+
+            <textarea data-action="edit-line" data-node-id="${node.id}" data-line-index="${i}">${escapeHtml(line)}</textarea>
+
+            ${hasChild && isExpanded ? `
+              <div class="child-wrap">
+                ${renderNode(child)}
+              </div>
+            ` : ""}
+          </div>
+        `;
+      }).join("");
+
+      const resultsHtml = node.results.map((res, i) => {
+        const prev = i === 0 ? "" : node.lines[i - 1];
+        const curr = node.lines[i];
+        return `
           <div class="result-card">
             <div class="result-head">
               <div class="result-title">${i + 1}行目（${LINE_NAMES[i]}）</div>
-              <span class="badge ${badgeClass(label)}">${label}</span>
+              <span class="badge ${badgeClass(res.label)}">${escapeHtml(res.label)}</span>
             </div>
 
             <div class="section-label">接続</div>
-            <div class="pair">${escapeHtml(relationName(i))}</div>
+            <div class="result-body">${escapeHtml(res.relation || relationName(i))}</div>
 
             <div class="section-label">内容</div>
-            <div class="pair">${escapeHtml(
+            <div class="result-body">${escapeHtml(
               i === 0
                 ? `当該行: ${curr || "（未入力）"}`
                 : `前: ${prev || "（未入力）"}\n次: ${curr || "（未入力）"}`
             )}</div>
 
             <div class="section-label">理由</div>
-            <div class="reason">${escapeHtml(reason)}</div>
+            <div class="reason">${escapeHtml(res.reason || "まだ判定していません。")}</div>
 
             <div class="section-label">補足</div>
-            <div class="meta">未判定</div>
+            <div class="meta">${escapeHtml(res.scoreText || "未判定")}</div>
           </div>
-        `);
-      }
+        `;
+      }).join("");
 
-      els.results.innerHTML = cards.join("");
+      return `
+        <section class="block depth-${Math.min(node.depth, 5)}">
+          <div class="block-header">
+            <div>
+              <div class="block-title">${escapeHtml(node.title)}</div>
+              <div class="block-meta">深さ ${node.depth} / 入力済み ${countNonEmptyLines(node)} 行 / ID ${escapeHtml(node.id)}</div>
+            </div>
+            <div class="block-actions">
+              <button class="secondary small" data-action="analyze-node" data-node-id="${node.id}" ${classifier ? "" : "disabled"}>
+                このブロックを判定
+              </button>
+              ${node.depth > 0 ? `
+                <button class="ghost small" data-action="collapse-all-children" data-node-id="${node.id}">
+                  子をたたむ
+                </button>
+              ` : ""}
+            </div>
+          </div>
+
+          ${linesHtml}
+
+          <div class="result-list">
+            ${resultsHtml}
+          </div>
+        </section>
+      `;
     }
 
-    function renderResult(index, label, relation, prev, curr, reason, scoreText) {
-      const cards = Array.from(els.results.children);
-      const card = cards[index];
-      if (!card) return;
+    function render() {
+      els.treeRoot.innerHTML = renderNode(tree);
+      els.analyzeRootBtn.disabled = !classifier;
+      els.analyzeAllBtn.disabled = !classifier;
+    }
 
-      card.innerHTML = `
-        <div class="result-head">
-          <div class="result-title">${index + 1}行目（${LINE_NAMES[index]}）</div>
-          <span class="badge ${badgeClass(label)}">${label}</span>
-        </div>
+    function ensureChild(node, lineIndex) {
+      if (!node.children[lineIndex]) {
+        node.children[lineIndex] = createNode(node.depth + 1, `${LINE_NAMES[lineIndex]} の詳細`);
+      }
+    }
 
-        <div class="section-label">接続</div>
-        <div class="pair">${escapeHtml(relation)}</div>
+    function collapseChildrenRecursively(node) {
+      node.expanded = [false, false, false, false, false];
+      for (const child of node.children) {
+        if (child) collapseChildrenRecursively(child);
+      }
+    }
 
-        <div class="section-label">内容</div>
-        <div class="pair">${escapeHtml(
-          index === 0
-            ? `当該行: ${curr || "（未入力）"}`
-            : `前: ${prev || "（未入力）"}\n次: ${curr || "（未入力）"}`
-        )}</div>
+    async function analyzeNode(node) {
+      node.results[0] = {
+        label: "問題なし",
+        reason: "1行目は比較対象がないため固定で問題なしです。",
+        scoreText: "固定判定",
+        relation: "比較対象なし",
+      };
 
-        <div class="section-label">理由</div>
-        <div class="reason">${escapeHtml(reason)}</div>
+      for (let i = 1; i < 5; i++) {
+        const result = await classifyPair(i - 1, i, node.lines[i - 1], node.lines[i]);
+        node.results[i] = result;
+      }
+    }
 
-        <div class="section-label">補足</div>
-        <div class="meta">${escapeHtml(scoreText || "なし")}</div>
-      `;
+    function collectNodes(node, list = []) {
+      list.push(node);
+      for (const child of node.children) {
+        if (child) collectNodes(child, list);
+      }
+      return list;
+    }
+
+    async function analyzeAllNodes() {
+      if (!classifier || isChecking) return;
+      isChecking = true;
+      els.analyzeAllBtn.disabled = true;
+      els.analyzeRootBtn.disabled = true;
+      els.loadBtn.disabled = true;
+
+      const nodes = collectNodes(tree, []);
+      for (let idx = 0; idx < nodes.length; idx++) {
+        setProgress(`全体判定中... ${idx + 1}/${nodes.length}`, ((idx + 1) / nodes.length) * 100);
+        await analyzeNode(nodes[idx]);
+        render();
+      }
+
+      setProgress("全ブロックの判定完了", 100);
+      els.analyzeAllBtn.disabled = false;
+      els.analyzeRootBtn.disabled = false;
+      els.loadBtn.disabled = false;
+      isChecking = false;
+    }
+
+    async function analyzeSingleNode(nodeId) {
+      if (!classifier || isChecking) return;
+      const node = findNodeById(tree, nodeId);
+      if (!node) return;
+
+      isChecking = true;
+      els.analyzeAllBtn.disabled = true;
+      els.analyzeRootBtn.disabled = true;
+      els.loadBtn.disabled = true;
+
+      setProgress(`ブロック ${node.title} を判定中...`, null);
+      await analyzeNode(node);
+      render();
+
+      setProgress("ブロック判定完了", 100);
+      els.analyzeAllBtn.disabled = false;
+      els.analyzeRootBtn.disabled = false;
+      els.loadBtn.disabled = false;
+      isChecking = false;
     }
 
     async function loadModel() {
@@ -699,7 +911,8 @@
 
       isLoading = true;
       els.loadBtn.disabled = true;
-      els.checkBtn.disabled = true;
+      els.analyzeRootBtn.disabled = true;
+      els.analyzeAllBtn.disabled = true;
 
       selectedDevice = supportsWebGPU() ? "webgpu" : "wasm";
       setDeviceState("loading", selectedDevice === "webgpu" ? "WebGPU を試行中" : "CPU (WASM) を使用");
@@ -721,10 +934,9 @@
         setModelState("ready", "モデル読込完了");
         setDeviceState("ready", selectedDevice === "webgpu" ? "WebGPU で実行" : "CPU (WASM) で実行");
         setProgress("準備完了", 100);
-        els.checkBtn.disabled = false;
+        els.analyzeRootBtn.disabled = false;
+        els.analyzeAllBtn.disabled = false;
       } catch (e) {
-        console.warn("WebGPU load failed, fallback to WASM:", e);
-
         try {
           selectedDevice = "wasm";
           setDeviceState("loading", "CPU (WASM) に切替中");
@@ -744,7 +956,8 @@
           setModelState("ready", "モデル読込完了");
           setDeviceState("ready", "CPU (WASM) で実行");
           setProgress("準備完了", 100);
-          els.checkBtn.disabled = false;
+          els.analyzeRootBtn.disabled = false;
+          els.analyzeAllBtn.disabled = false;
         } catch (err) {
           console.error(err);
           setModelState("error", "モデル読込失敗");
@@ -755,152 +968,88 @@
       } finally {
         isLoading = false;
         els.loadBtn.disabled = false;
-      }
-    }
-
-    async function classifyPair(prevIndex, currIndex, prevText, currText) {
-      const relation = `${LINE_NAMES[prevIndex]} → ${LINE_NAMES[currIndex]}`;
-
-      if (!prevText || !currText) {
-        const fallback = heuristicClassify(prevText, currText, prevIndex, currIndex);
-        return {
-          label: fallback.label,
-          reason: lineSpecificReason(fallback.label, LINE_NAMES[prevIndex], LINE_NAMES[currIndex], prevText, currText),
-          relation,
-          scoreText: `fallback: ${fallback.scoreText}`
-        };
-      }
-
-      if (!classifier) {
-        const fallback = heuristicClassify(prevText, currText, prevIndex, currIndex);
-        return {
-          label: fallback.label,
-          reason: lineSpecificReason(fallback.label, LINE_NAMES[prevIndex], LINE_NAMES[currIndex], prevText, currText),
-          relation,
-          scoreText: `fallback: ${fallback.scoreText}`
-        };
-      }
-
-      const sequence = buildPrompt(
-        LINE_NAMES[prevIndex],
-        LINE_NAMES[currIndex],
-        prevText,
-        currText
-      );
-
-      try {
-        const output = await classifier(sequence, LABELS, {
-          multi_label: false,
-          hypothesis_template: "この接続の判定は {}。"
-        });
-
-        const labels = Array.isArray(output.labels) ? output.labels : [];
-        const scores = Array.isArray(output.scores) ? output.scores : [];
-        const topLabel = labels[0] || "飛躍";
-        const topScore = typeof scores[0] === "number" ? scores[0] : null;
-
-        return {
-          label: LABELS.includes(topLabel) ? topLabel : "飛躍",
-          reason: lineSpecificReason(
-            LABELS.includes(topLabel) ? topLabel : "飛躍",
-            LINE_NAMES[prevIndex],
-            LINE_NAMES[currIndex],
-            prevText,
-            currText
-          ),
-          relation,
-          scoreText: topScore === null
-            ? "model score unavailable"
-            : `model score=${topScore.toFixed(3)}`
-        };
-      } catch (e) {
-        console.warn("classification failed, using fallback:", e);
-
-        const fallback = heuristicClassify(prevText, currText, prevIndex, currIndex);
-        return {
-          label: fallback.label,
-          reason: lineSpecificReason(fallback.label, LINE_NAMES[prevIndex], LINE_NAMES[currIndex], prevText, currText),
-          relation,
-          scoreText: `fallback after error: ${fallback.scoreText}`
-        };
-      }
-    }
-
-    async function checkLogic() {
-      if (isChecking) return;
-      isChecking = true;
-
-      if (!classifier) {
-        const go = confirm("まだモデルが読み込まれていません。先に読み込みます。");
-        if (!go) {
-          isChecking = false;
-          return;
-        }
-        await loadModel();
-        if (!classifier) {
-          isChecking = false;
-          return;
-        }
-      }
-
-      els.checkBtn.disabled = true;
-      els.loadBtn.disabled = true;
-      setProgress("判定中...", null);
-
-      const lines = getLines();
-      renderInitialResults();
-
-      renderResult(
-        0,
-        "問題なし",
-        "比較対象なし",
-        "",
-        lines[0],
-        "1行目は比較対象がないため固定で問題なしです。",
-        "固定判定"
-      );
-
-      for (let i = 1; i < 5; i++) {
-        renderResult(
-          i,
-          "判定中",
-          relationName(i),
-          lines[i - 1],
-          lines[i],
-          "判定中です。",
-          "処理待機中"
-        );
-      }
-
-      try {
-        for (let i = 1; i < 5; i++) {
-          setProgress(`${i}/4 件目を判定中...`, (i / 4) * 100);
-          const result = await classifyPair(i - 1, i, lines[i - 1], lines[i]);
-          renderResult(i, result.label, result.relation, lines[i - 1], lines[i], result.reason, result.scoreText);
-        }
-        setProgress("判定完了", 100);
-      } finally {
-        els.checkBtn.disabled = false;
-        els.loadBtn.disabled = false;
-        isChecking = false;
+        render();
       }
     }
 
     function clearAll() {
-      els.l1.value = "";
-      els.l2.value = "";
-      els.l3.value = "";
-      els.l4.value = "";
-      els.l5.value = "";
-      renderInitialResults();
+      tree = createNode(0, "ルート");
+      resetNodeResults(tree);
+      render();
       setProgress(classifier ? "準備完了" : "待機中", classifier ? 100 : 0);
     }
 
-    els.loadBtn.addEventListener("click", loadModel);
-    els.checkBtn.addEventListener("click", checkLogic);
-    els.clearBtn.addEventListener("click", clearAll);
+    els.treeRoot.addEventListener("input", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLTextAreaElement)) return;
+      const action = target.dataset.action;
+      if (action !== "edit-line") return;
 
-    renderInitialResults();
+      const nodeId = target.dataset.nodeId;
+      const lineIndex = Number(target.dataset.lineIndex);
+      const node = findNodeById(tree, nodeId);
+      if (!node || Number.isNaN(lineIndex)) return;
+
+      node.lines[lineIndex] = target.value;
+
+      if (target.value.trim()) {
+        ensureChild(node, lineIndex);
+      }
+
+      render();
+    });
+
+    els.treeRoot.addEventListener("click", async (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+
+      const button = target.closest("button");
+      if (!button) return;
+
+      const action = button.dataset.action;
+      const nodeId = button.dataset.nodeId;
+      const lineIndex = Number(button.dataset.lineIndex);
+      const node = nodeId ? findNodeById(tree, nodeId) : null;
+
+      if (action === "toggle-child") {
+        if (!node || Number.isNaN(lineIndex)) return;
+        if (!node.children[lineIndex] && node.lines[lineIndex].trim()) {
+          ensureChild(node, lineIndex);
+        }
+        if (node.children[lineIndex]) {
+          node.expanded[lineIndex] = !node.expanded[lineIndex];
+          render();
+        }
+        return;
+      }
+
+      if (action === "remove-child") {
+        if (!node || Number.isNaN(lineIndex)) return;
+        node.children[lineIndex] = null;
+        node.expanded[lineIndex] = false;
+        render();
+        return;
+      }
+
+      if (action === "analyze-node") {
+        if (!node) return;
+        await analyzeSingleNode(node.id);
+        return;
+      }
+
+      if (action === "collapse-all-children") {
+        if (!node) return;
+        collapseChildrenRecursively(node);
+        render();
+      }
+    });
+
+    els.loadBtn.addEventListener("click", loadModel);
+    els.analyzeRootBtn.addEventListener("click", async () => {
+      await analyzeSingleNode(tree.id);
+    });
+    els.analyzeAllBtn.addEventListener("click", analyzeAllNodes);
+    els.clearBtn.addEventListener("click", clearAll);
 
     if (supportsWebGPU()) {
       setDeviceState("ready", "WebGPU 利用可能");
@@ -909,6 +1058,8 @@
     }
     setModelState("ready", "未ロード");
     setProgress("待機中", 0);
+
+    render();
   </script>
 </body>
 </html>
