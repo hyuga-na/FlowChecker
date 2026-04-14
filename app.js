@@ -2,7 +2,8 @@ import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers
 
 const MODEL_ID = "xavierbarbier/xlm-roberta-large-xnli";
 const LINE_NAMES = ["背景", "課題", "解法", "結果", "考察"];
-const LABELS = ["問題なし", "飛躍", "不足", "未定義", "過剰"];
+const ROLE_LABELS = ["適切", "不適切"];
+const FLOW_LABELS = ["問題なし", "飛躍"];
 
 let classifier = null;
 let selectedDevice = "wasm";
@@ -14,10 +15,12 @@ function createEmptyResults() {
   return [
     {
       label: "問題なし",
-      reason: "1行目は比較対象がないため固定で問題なしです。",
+      reason: "1行目は比較対象がないため接続判定は固定で問題なしです。",
       scoreText: "固定判定",
       relation: "比較対象なし",
       analyzed: true,
+      roleFit: "未判定",
+      flowFit: "問題なし",
     },
     {
       label: "未判定",
@@ -25,6 +28,8 @@ function createEmptyResults() {
       scoreText: "",
       relation: "背景 → 課題",
       analyzed: false,
+      roleFit: "未判定",
+      flowFit: "未判定",
     },
     {
       label: "未判定",
@@ -32,6 +37,8 @@ function createEmptyResults() {
       scoreText: "",
       relation: "課題 → 解法",
       analyzed: false,
+      roleFit: "未判定",
+      flowFit: "未判定",
     },
     {
       label: "未判定",
@@ -39,6 +46,8 @@ function createEmptyResults() {
       scoreText: "",
       relation: "解法 → 結果",
       analyzed: false,
+      roleFit: "未判定",
+      flowFit: "未判定",
     },
     {
       label: "未判定",
@@ -46,6 +55,8 @@ function createEmptyResults() {
       scoreText: "",
       relation: "結果 → 考察",
       analyzed: false,
+      roleFit: "未判定",
+      flowFit: "未判定",
     },
   ];
 }
@@ -153,30 +164,10 @@ function shortLabel(label) {
   }
 }
 
-function lineSpecificReason(label, prevRole, currRole, prevText, currText) {
-  const hasPrev = !!prevText.trim();
-  const hasCurr = !!currText.trim();
-
-  if (!hasPrev || !hasCurr) {
-    return "空欄を含むため判定対象外とし、問題なし扱いにしました。";
-  }
-
-  const transition = `${prevRole}から${currRole}への接続`;
-
-  switch (label) {
-    case "問題なし":
-      return `${transition}は自然です。直前の内容から次の主張が無理なく導かれています。`;
-    case "飛躍":
-      return `${transition}に中間説明が不足しています。前の行から次の主張へ移る論理の橋渡しが弱いです。`;
-    case "不足":
-      return `${currRole}を支えるための情報が${prevRole}に十分含まれていません。前提や条件の補足が必要です。`;
-    case "未定義":
-      return `${currRole}で使われている概念・対象・手法の一部が、それ以前の行で導入されていません。`;
-    case "過剰":
-      return `${currRole}の主張が${prevRole}に対して強すぎます。直前の内容からはそこまで言い切れません。`;
-    default:
-      return "";
-  }
+function summarizeNodeLines(node) {
+  return node.lines
+    .map((line, i) => `${LINE_NAMES[i]}: ${line.trim() || "未入力"}`)
+    .join("\n");
 }
 
 function getNodePathTitles(node) {
@@ -187,12 +178,6 @@ function getNodePathTitles(node) {
     current = current.parent;
   }
   return titles;
-}
-
-function summarizeNodeLines(node) {
-  return node.lines
-    .map((line, i) => `${LINE_NAMES[i]}: ${line.trim() || "未入力"}`)
-    .join("\n");
 }
 
 function getAncestorContext(node, maxDepth = 2) {
@@ -214,7 +199,30 @@ function getAncestorContext(node, maxDepth = 2) {
   return contexts.join("\n\n");
 }
 
-function buildPrompt(node, prevIndex, currIndex, prevText, currText) {
+function buildRolePrompt(node, lineIndex, text) {
+  const pathText = getNodePathTitles(node).join(" > ");
+  const blockSummary = summarizeNodeLines(node);
+  const ancestorContext = getAncestorContext(node, 2);
+
+  return [
+    `ブロック階層: ${pathText}`,
+    ancestorContext ? `上位文脈:\n${ancestorContext}` : "",
+    `現在のブロック全体:\n${blockSummary}`,
+    "",
+    `判定対象の行の役割: ${LINE_NAMES[lineIndex]}`,
+    `判定対象の文: ${text}`,
+    "",
+    "この文が、指定された役割に適切かを判定する。",
+    "研究構成上の役割として判断すること。",
+    "使用可能なラベルは次の2つのみ。",
+    "適切: 指定された役割の文として自然である。",
+    "不適切: 別の役割の文になっている、または役割に合っていない。",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildFlowPrompt(node, prevIndex, currIndex, prevText, currText) {
   const pathText = getNodePathTitles(node).join(" > ");
   const blockSummary = summarizeNodeLines(node);
   const ancestorContext = getAncestorContext(node, 2);
@@ -229,170 +237,214 @@ function buildPrompt(node, prevIndex, currIndex, prevText, currText) {
     ancestorContext ? `上位文脈:\n${ancestorContext}` : "",
     `現在のブロック全体:\n${blockSummary}`,
     "",
-    `判定対象の前の行の役割: ${LINE_NAMES[prevIndex]}`,
-    `判定対象の次の行の役割: ${LINE_NAMES[currIndex]}`,
-    `判定対象の前の文: ${prevText}`,
-    `判定対象の次の文: ${currText}`,
+    `前の行の役割: ${LINE_NAMES[prevIndex]}`,
+    `次の行の役割: ${LINE_NAMES[currIndex]}`,
+    `前の文: ${prevText}`,
+    `次の文: ${currText}`,
     "",
-    "上位文脈と現在ブロック全体を踏まえて、前の行から次の行への研究ロジック上の接続を判定する。",
-    "表面的な話題類似ではなく、論点・目的・問題設定・手法・結果・考察の整合性を見る。",
-    "使用可能なラベルは次の5つのみ。",
-    "問題なし: 自然につながっている。",
-    "飛躍: 中間説明がなく、論理の橋渡しが弱い。",
-    "不足: 次の行を支える前提情報が足りない。",
-    "未定義: 次の行で使う概念や対象が未導入である。",
-    "過剰: 次の行の主張が強すぎる。",
-    "",
-    "この接続に最も適切なラベルを1つ選ぶ。"
+    "前の行から次の行への接続が研究構成上自然かを判定する。",
+    "表面的な話題類似ではなく、役割の遷移が自然かを見る。",
+    "使用可能なラベルは次の2つのみ。",
+    "問題なし: 前の行から次の行へ自然につながっている。",
+    "飛躍: 前の行から次の行への遷移が不自然である。",
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-function getHeuristicFeatures(prevText, currText) {
-  const prev = prevText || "";
-  const curr = currText || "";
+function getHeuristicRoleLabel(lineIndex, text) {
+  const t = text.trim();
+  if (!t) return "適切";
 
-  const feature = {
-    overlap: 0,
-    hasMethodWord: false,
-    hasResultWord: false,
-    hasDiscussionWord: false,
-    hasAbstractRef: false,
-    introducesNewTerms: false,
-    strongClaim: false,
+  const cues = {
+    0: ["背景", "近年", "従来", "一般に", "含まれる", "知られている", "注目されている"],
+    1: ["課題", "問題", "難しい", "必要", "未解決", "不足", "困難"],
+    2: ["提案", "用いる", "用いて", "手法", "モデル", "設計", "導入", "FiLM", "学習"],
+    3: ["結果", "性能", "向上", "改善", "実験", "評価", "精度", "達成", "示した"],
+    4: ["考察", "示唆", "可能性", "有効", "考えられる", "解釈", "意味", "有用"],
   };
 
-  const splitWords = (text) =>
-    text
-      .split(/[\s、。，．。・()（）「」『』【】\[\],.!?！？:：;；/]+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length >= 2);
+  const matched = (cues[lineIndex] || []).some((w) => t.includes(w));
 
-  const prevWords = splitWords(prev);
-  const currWords = splitWords(curr);
-
-  const prevSet = new Set(prevWords);
-  const currSet = new Set(currWords);
-
-  let overlap = 0;
-  for (const w of currSet) {
-    if (prevSet.has(w)) overlap++;
+  if (lineIndex === 1 && (t.includes("FiLM") || t.includes("提案") || t.includes("手法"))) {
+    return "不適切";
   }
-  feature.overlap = overlap;
+  if (lineIndex === 2 && (t.includes("結果") || t.includes("性能向上") || t.includes("示した"))) {
+    return "不適切";
+  }
+  if (lineIndex === 3 && (t.includes("必要") || t.includes("課題"))) {
+    return "不適切";
+  }
+  if (lineIndex === 4 && (t.includes("提案手法") || t.includes("有効") || t.includes("可能性"))) {
+    return "適切";
+  }
 
-  const methodWords = ["提案", "手法", "モデル", "学習", "推定", "分類", "生成", "FiLM", "手順", "設計"];
-  const resultWords = ["結果", "性能", "向上", "改善", "精度", "有意", "実験", "評価", "達成"];
-  const discussionWords = ["有効", "示唆", "考えられる", "可能性", "解釈", "意味", "有用"];
-  const abstractRefs = ["これ", "それ", "この", "その", "両者", "提案手法", "本手法", "本研究"];
-  const strongClaims = ["証明", "完全", "必ず", "明らか", "万能", "決定的", "全て", "十分である", "有効である"];
-
-  feature.hasMethodWord = methodWords.some((w) => curr.includes(w));
-  feature.hasResultWord = resultWords.some((w) => curr.includes(w));
-  feature.hasDiscussionWord = discussionWords.some((w) => curr.includes(w));
-  feature.hasAbstractRef = abstractRefs.some((w) => curr.includes(w));
-
-  const newTerms = currWords.filter((w) => !prevSet.has(w) && w.length >= 3);
-  feature.introducesNewTerms = newTerms.length >= 2;
-
-  feature.strongClaim = strongClaims.some((w) => curr.includes(w));
-
-  return feature;
+  return matched ? "適切" : "不適切";
 }
 
-function heuristicClassify(prevText, currText, currIndex) {
-  const hasPrev = !!prevText.trim();
-  const hasCurr = !!currText.trim();
+function getHeuristicFlowLabel(prevIndex, currIndex, prevText, currText) {
+  const prev = prevText.trim();
+  const curr = currText.trim();
 
-  if (!hasPrev || !hasCurr) {
-    return {
-      label: "問題なし",
-      scoreText: "空欄を含むため問題なし扱い",
-    };
+  if (!prev || !curr) return "問題なし";
+
+  if (prevIndex === 0 && currIndex === 1) {
+    if (curr.includes("FiLM") || curr.includes("提案") || curr.includes("手法") || curr.includes("注入")) {
+      return "飛躍";
+    }
   }
 
-  const f = getHeuristicFeatures(prevText, currText);
-  let label = "問題なし";
-
-  if (currIndex === 1) {
-    if (f.introducesNewTerms && !f.hasAbstractRef) label = "未定義";
-    else if (f.strongClaim) label = "過剰";
-    else if (f.overlap === 0) label = "飛躍";
-  } else if (currIndex === 2) {
-    if (f.introducesNewTerms && f.hasMethodWord && f.overlap === 0) label = "未定義";
-    else if (f.overlap === 0) label = "飛躍";
-    else if (!f.hasMethodWord) label = "不足";
-  } else if (currIndex === 3) {
-    if (f.strongClaim) label = "過剰";
-    else if (!f.hasResultWord) label = "不足";
-    else if (f.overlap === 0) label = "飛躍";
-  } else if (currIndex === 4) {
-    if (f.strongClaim) label = "過剰";
-    else if (f.introducesNewTerms && !f.hasAbstractRef) label = "未定義";
-    else if (!f.hasDiscussionWord && f.overlap === 0) label = "飛躍";
+  if (prevIndex === 1 && currIndex === 2) {
+    if (curr.includes("提案") || curr.includes("手法") || curr.includes("FiLM") || curr.includes("用いる")) {
+      return "問題なし";
+    }
   }
+
+  if (prevIndex === 2 && currIndex === 3) {
+    if (curr.includes("結果") || curr.includes("性能") || curr.includes("向上") || curr.includes("実験")) {
+      return "問題なし";
+    }
+  }
+
+  if (prevIndex === 3 && currIndex === 4) {
+    if (curr.includes("有効") || curr.includes("可能性") || curr.includes("示唆") || curr.includes("考えられる")) {
+      return "問題なし";
+    }
+  }
+
+  return "飛躍";
+}
+
+function decideFinalLabel(lineIndex, roleFit, flowFit, text) {
+  const t = text.trim();
+
+  if (!t) return "問題なし";
+  if (lineIndex === 0) {
+    return roleFit === "不適切" ? "未定義" : "問題なし";
+  }
+
+  if (roleFit === "不適切") {
+    if (lineIndex === 1) return "未定義";
+    if (lineIndex === 2) return "未定義";
+    if (lineIndex === 3) return "不足";
+    if (lineIndex === 4) return "過剰";
+    return "未定義";
+  }
+
+  if (flowFit === "飛躍") {
+    return "飛躍";
+  }
+
+  return "問題なし";
+}
+
+function buildReason(lineIndex, roleFit, flowFit, prevText, currText) {
+  const currRole = LINE_NAMES[lineIndex];
+  const prevRole = lineIndex > 0 ? LINE_NAMES[lineIndex - 1] : null;
+
+  if (!currText.trim()) {
+    return `${currRole}が空欄のため、問題なし扱いにしています。`;
+  }
+
+  if (lineIndex === 0) {
+    if (roleFit === "不適切") {
+      return `1行目は背景としては不自然です。背景ではなく別の役割の文になっている可能性があります。`;
+    }
+    return `1行目は背景として自然です。`;
+  }
+
+  if (!prevText.trim()) {
+    return `前の行が空欄のため接続判定は行わず、役割のみを見ました。`;
+  }
+
+  if (roleFit === "不適切") {
+    return `${currRole}の位置にある文が、${currRole}ではなく別の役割の内容になっている可能性があります。`;
+  }
+
+  if (flowFit === "飛躍") {
+    return `${prevRole}から${currRole}への遷移が不自然です。役割の流れとして中間説明が不足しています。`;
+  }
+
+  return `${currRole}として自然であり、前段との接続も自然です。`;
+}
+
+async function runZeroShot(sequence, labels, hypothesisTemplate) {
+  const output = await classifier(sequence, labels, {
+    multi_label: false,
+    hypothesis_template: hypothesisTemplate,
+  });
+
+  const outLabels = Array.isArray(output.labels) ? output.labels : [];
+  const outScores = Array.isArray(output.scores) ? output.scores : [];
+  const topLabel = outLabels[0] || labels[0];
+  const topScore = typeof outScores[0] === "number" ? outScores[0] : null;
 
   return {
-    label,
-    scoreText: `fallback: overlap=${f.overlap}, method=${f.hasMethodWord}, result=${f.hasResultWord}, discussion=${f.hasDiscussionWord}, newTerms=${f.introducesNewTerms}, strongClaim=${f.strongClaim}`,
+    label: labels.includes(topLabel) ? topLabel : labels[0],
+    score: topScore,
   };
 }
 
-async function classifyPair(node, prevIndex, currIndex, prevText, currText) {
-  const relation = `${LINE_NAMES[prevIndex]} → ${LINE_NAMES[currIndex]}`;
-  const hasPrev = !!prevText.trim();
-  const hasCurr = !!currText.trim();
-
-  if (!hasPrev || !hasCurr) {
+async function classifyLineRole(node, lineIndex, text) {
+  if (!text.trim()) {
     return {
-      label: "問題なし",
-      reason: lineSpecificReason("問題なし", LINE_NAMES[prevIndex], LINE_NAMES[currIndex], prevText, currText),
-      relation,
-      scoreText: "空欄を含むため問題なし扱い",
-      analyzed: true,
+      label: "適切",
+      scoreText: "空欄のため適切扱い",
     };
   }
 
   if (!classifier) {
-    const fallback = heuristicClassify(prevText, currText, currIndex);
+    const label = getHeuristicRoleLabel(lineIndex, text);
     return {
-      label: fallback.label,
-      reason: lineSpecificReason(fallback.label, LINE_NAMES[prevIndex], LINE_NAMES[currIndex], prevText, currText),
-      relation,
-      scoreText: fallback.scoreText,
-      analyzed: true,
+      label,
+      scoreText: "fallback role",
     };
   }
 
-  const sequence = buildPrompt(node, prevIndex, currIndex, prevText, currText);
-
   try {
-    const output = await classifier(sequence, LABELS, {
-      multi_label: false,
-      hypothesis_template: "この接続の判定は {}。",
-    });
-
-    const labels = Array.isArray(output.labels) ? output.labels : [];
-    const scores = Array.isArray(output.scores) ? output.scores : [];
-    const topLabel = labels[0] || "飛躍";
-    const topScore = typeof scores[0] === "number" ? scores[0] : null;
-    const safeLabel = LABELS.includes(topLabel) ? topLabel : "飛躍";
-
+    const sequence = buildRolePrompt(node, lineIndex, text);
+    const result = await runZeroShot(sequence, ROLE_LABELS, "この文は {}。");
     return {
-      label: safeLabel,
-      reason: lineSpecificReason(safeLabel, LINE_NAMES[prevIndex], LINE_NAMES[currIndex], prevText, currText),
-      relation,
-      scoreText: topScore === null ? "model score unavailable" : `model score=${topScore.toFixed(3)}`,
-      analyzed: true,
+      label: result.label,
+      scoreText: result.score == null ? "role score unavailable" : `role score=${result.score.toFixed(3)}`,
     };
   } catch (e) {
-    const fallback = heuristicClassify(prevText, currText, currIndex);
+    const label = getHeuristicRoleLabel(lineIndex, text);
     return {
-      label: fallback.label,
-      reason: lineSpecificReason(fallback.label, LINE_NAMES[prevIndex], LINE_NAMES[currIndex], prevText, currText),
-      relation,
-      scoreText: `fallback after error: ${fallback.scoreText}`,
-      analyzed: true,
+      label,
+      scoreText: "fallback role after error",
+    };
+  }
+}
+
+async function classifyFlow(node, prevIndex, currIndex, prevText, currText) {
+  if (!prevText.trim() || !currText.trim()) {
+    return {
+      label: "問題なし",
+      scoreText: "空欄を含むため問題なし扱い",
+    };
+  }
+
+  if (!classifier) {
+    const label = getHeuristicFlowLabel(prevIndex, currIndex, prevText, currText);
+    return {
+      label,
+      scoreText: "fallback flow",
+    };
+  }
+
+  try {
+    const sequence = buildFlowPrompt(node, prevIndex, currIndex, prevText, currText);
+    const result = await runZeroShot(sequence, FLOW_LABELS, "この接続は {}。");
+    return {
+      label: result.label,
+      scoreText: result.score == null ? "flow score unavailable" : `flow score=${result.score.toFixed(3)}`,
+    };
+  } catch (e) {
+    const label = getHeuristicFlowLabel(prevIndex, currIndex, prevText, currText);
+    return {
+      label,
+      scoreText: "fallback flow after error",
     };
   }
 }
@@ -451,6 +503,8 @@ function collectReasonItems(node, path = "ルート", items = []) {
       relation: res.relation || (i === 0 ? "比較対象なし" : `${LINE_NAMES[i - 1]} → ${LINE_NAMES[i]}`),
       reason: res.reason || "",
       scoreText: res.scoreText || "",
+      roleFit: res.roleFit || "未判定",
+      flowFit: res.flowFit || "未判定",
     });
   });
 
@@ -476,7 +530,10 @@ function renderReasonsPanel() {
         <div class="reason-title">${escapeHtml(item.path)} / ${item.lineIndex}行目（${item.lineName}）</div>
         <span class="line-badge ${badgeClass(item.label)}">${escapeHtml(item.label)}</span>
       </div>
-      <div class="reason-body">${escapeHtml(item.relation)}\n${escapeHtml(item.reason)}</div>
+      <div class="reason-body">${escapeHtml(item.relation)}
+役割整合性: ${escapeHtml(item.roleFit)}
+接続整合性: ${escapeHtml(item.flowFit)}
+${escapeHtml(item.reason)}</div>
       <div class="reason-meta">${escapeHtml(item.scoreText)}</div>
     </div>
   `).join("");
@@ -558,17 +615,32 @@ function render() {
 }
 
 async function analyzeNode(node) {
+  const role0 = await classifyLineRole(node, 0, node.lines[0]);
+
   node.results[0] = {
-    label: "問題なし",
-    reason: "1行目は比較対象がないため固定で問題なしです。",
-    scoreText: "固定判定",
+    label: decideFinalLabel(0, role0.label, "問題なし", node.lines[0]),
+    reason: buildReason(0, role0.label, "問題なし", "", node.lines[0]),
+    scoreText: role0.scoreText,
     relation: "比較対象なし",
     analyzed: true,
+    roleFit: role0.label,
+    flowFit: "問題なし",
   };
 
   for (let i = 1; i < 5; i++) {
-    const result = await classifyPair(node, i - 1, i, node.lines[i - 1], node.lines[i]);
-    node.results[i] = result;
+    const roleResult = await classifyLineRole(node, i, node.lines[i]);
+    const flowResult = await classifyFlow(node, i - 1, i, node.lines[i - 1], node.lines[i]);
+    const finalLabel = decideFinalLabel(i, roleResult.label, flowResult.label, node.lines[i]);
+
+    node.results[i] = {
+      label: finalLabel,
+      reason: buildReason(i, roleResult.label, flowResult.label, node.lines[i - 1], node.lines[i]),
+      scoreText: `${roleResult.scoreText} / ${flowResult.scoreText}`,
+      relation: `${LINE_NAMES[i - 1]} → ${LINE_NAMES[i]}`,
+      analyzed: true,
+      roleFit: roleResult.label,
+      flowFit: flowResult.label,
+    };
   }
 }
 
@@ -687,19 +759,30 @@ async function loadModel() {
   }
 }
 
-function resetAllParentLinks(node, parent = null, parentLineIndex = null) {
-  node.parent = parent;
-  node.parentLineIndex = parentLineIndex;
-  node.children.forEach((child, i) => {
-    if (child) resetAllParentLinks(child, node, i);
-  });
-}
-
 function clearAll() {
   tree = createNode(0, "ルート");
   resetNodeResults(tree);
   render();
   setProgress(classifier ? "準備完了" : "待機中", classifier ? 100 : 0);
+}
+
+function nodeToMarkdown(node, level = 0) {
+  const indent = "  ".repeat(level);
+  const lines = [];
+
+  for (let i = 0; i < 5; i++) {
+    const text = node.lines[i].trim();
+    if (!text && !node.children[i]) continue;
+
+    lines.push(`${indent}- **${LINE_NAMES[i]}**: ${text || ""}`.trimEnd());
+
+    if (node.children[i]) {
+      const childMd = nodeToMarkdown(node.children[i], level + 1);
+      if (childMd) lines.push(childMd);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 async function copyTextToClipboard(text) {
@@ -734,25 +817,6 @@ async function copyTextToClipboard(text) {
   if (!successful) {
     throw new Error("execCommand copy failed");
   }
-}
-
-function nodeToMarkdown(node, level = 0) {
-  const indent = "  ".repeat(level);
-  const lines = [];
-
-  for (let i = 0; i < 5; i++) {
-    const text = node.lines[i].trim();
-    if (!text && !node.children[i]) continue;
-
-    lines.push(`${indent}- **${LINE_NAMES[i]}**: ${text || ""}`.trimEnd());
-
-    if (node.children[i]) {
-      const childMd = nodeToMarkdown(node.children[i], level + 1);
-      if (childMd) lines.push(childMd);
-    }
-  }
-
-  return lines.join("\n");
 }
 
 async function copyMarkdown() {
@@ -852,5 +916,4 @@ if (supportsWebGPU()) {
 setModelState("ready", "未ロード");
 setProgress("待機中", 0);
 
-resetAllParentLinks(tree);
 render();
