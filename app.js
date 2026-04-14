@@ -50,11 +50,13 @@ function createEmptyResults() {
   ];
 }
 
-function createNode(depth = 0, title = "ルート") {
+function createNode(depth = 0, title = "ルート", parent = null, parentLineIndex = null) {
   return {
     id: `node-${++nodeCounter}`,
     depth,
     title,
+    parent,
+    parentLineIndex,
     lines: ["", "", "", "", ""],
     children: [null, null, null, null, null],
     expanded: [false, false, false, false, false],
@@ -68,6 +70,7 @@ const els = {
   loadBtn: document.getElementById("load-btn"),
   analyzeRootBtn: document.getElementById("analyze-root-btn"),
   analyzeAllBtn: document.getElementById("analyze-all-btn"),
+  copyMdBtn: document.getElementById("copy-md-btn"),
   clearBtn: document.getElementById("clear-btn"),
   modelStatus: document.getElementById("model-status"),
   modelDot: document.getElementById("model-dot"),
@@ -176,14 +179,63 @@ function lineSpecificReason(label, prevRole, currRole, prevText, currText) {
   }
 }
 
-function buildPrompt(prevLabel, currLabel, prevText, currText) {
+function getNodePathTitles(node) {
+  const titles = [];
+  let current = node;
+  while (current) {
+    titles.unshift(current.title);
+    current = current.parent;
+  }
+  return titles;
+}
+
+function summarizeNodeLines(node) {
+  return node.lines
+    .map((line, i) => `${LINE_NAMES[i]}: ${line.trim() || "未入力"}`)
+    .join("\n");
+}
+
+function getAncestorContext(node, maxDepth = 2) {
+  const contexts = [];
+  let current = node.parent;
+  let depth = 0;
+
+  while (current && depth < maxDepth) {
+    contexts.unshift(
+      [
+        `親ブロック名: ${current.title}`,
+        summarizeNodeLines(current),
+      ].join("\n")
+    );
+    current = current.parent;
+    depth += 1;
+  }
+
+  return contexts.join("\n\n");
+}
+
+function buildPrompt(node, prevIndex, currIndex, prevText, currText) {
+  const pathText = getNodePathTitles(node).join(" > ");
+  const blockSummary = summarizeNodeLines(node);
+  const ancestorContext = getAncestorContext(node, 2);
+  const parentLineInfo =
+    node.parent && node.parentLineIndex !== null
+      ? `このブロックは親ブロックの「${LINE_NAMES[node.parentLineIndex]}」を詳細化したものです。`
+      : "このブロックは最上位ブロックです。";
+
   return [
-    `前の行の役割: ${prevLabel}`,
-    `次の行の役割: ${currLabel}`,
-    `前の文: ${prevText}`,
-    `次の文: ${currText}`,
+    `ブロック階層: ${pathText}`,
+    parentLineInfo,
+    ancestorContext ? `上位文脈:\n${ancestorContext}` : "",
+    `現在のブロック全体:\n${blockSummary}`,
     "",
-    "前の行から次の行への研究ロジック上の接続を判定する。",
+    `判定対象の前の行の役割: ${LINE_NAMES[prevIndex]}`,
+    `判定対象の次の行の役割: ${LINE_NAMES[currIndex]}`,
+    `判定対象の前の文: ${prevText}`,
+    `判定対象の次の文: ${currText}`,
+    "",
+    "上位文脈と現在ブロック全体を踏まえて、前の行から次の行への研究ロジック上の接続を判定する。",
+    "表面的な話題類似ではなく、論点・目的・問題設定・手法・結果・考察の整合性を見る。",
     "使用可能なラベルは次の5つのみ。",
     "問題なし: 自然につながっている。",
     "飛躍: 中間説明がなく、論理の橋渡しが弱い。",
@@ -192,7 +244,9 @@ function buildPrompt(prevLabel, currLabel, prevText, currText) {
     "過剰: 次の行の主張が強すぎる。",
     "",
     "この接続に最も適切なラベルを1つ選ぶ。"
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function getHeuristicFeatures(prevText, currText) {
@@ -284,7 +338,7 @@ function heuristicClassify(prevText, currText, currIndex) {
   };
 }
 
-async function classifyPair(prevIndex, currIndex, prevText, currText) {
+async function classifyPair(node, prevIndex, currIndex, prevText, currText) {
   const relation = `${LINE_NAMES[prevIndex]} → ${LINE_NAMES[currIndex]}`;
   const hasPrev = !!prevText.trim();
   const hasCurr = !!currText.trim();
@@ -310,12 +364,7 @@ async function classifyPair(prevIndex, currIndex, prevText, currText) {
     };
   }
 
-  const sequence = buildPrompt(
-    LINE_NAMES[prevIndex],
-    LINE_NAMES[currIndex],
-    prevText,
-    currText
-  );
+  const sequence = buildPrompt(node, prevIndex, currIndex, prevText, currText);
 
   try {
     const output = await classifier(sequence, LABELS, {
@@ -367,7 +416,12 @@ function findNodeById(node, id) {
 
 function ensureChild(node, lineIndex) {
   if (!node.children[lineIndex]) {
-    node.children[lineIndex] = createNode(node.depth + 1, `${LINE_NAMES[lineIndex]} の詳細`);
+    node.children[lineIndex] = createNode(
+      node.depth + 1,
+      `${LINE_NAMES[lineIndex]} の詳細`,
+      node,
+      lineIndex
+    );
   }
 }
 
@@ -513,7 +567,7 @@ async function analyzeNode(node) {
   };
 
   for (let i = 1; i < 5; i++) {
-    const result = await classifyPair(i - 1, i, node.lines[i - 1], node.lines[i]);
+    const result = await classifyPair(node, i - 1, i, node.lines[i - 1], node.lines[i]);
     node.results[i] = result;
   }
 }
@@ -527,6 +581,7 @@ async function analyzeSingleNode(nodeId) {
   els.analyzeAllBtn.disabled = true;
   els.analyzeRootBtn.disabled = true;
   els.loadBtn.disabled = true;
+  els.copyMdBtn.disabled = true;
 
   setProgress(`ブロック ${node.title} を判定中...`, null);
   await analyzeNode(node);
@@ -536,6 +591,7 @@ async function analyzeSingleNode(nodeId) {
   els.analyzeAllBtn.disabled = false;
   els.analyzeRootBtn.disabled = false;
   els.loadBtn.disabled = false;
+  els.copyMdBtn.disabled = false;
   isChecking = false;
 }
 
@@ -546,6 +602,7 @@ async function analyzeAllNodes() {
   els.analyzeAllBtn.disabled = true;
   els.analyzeRootBtn.disabled = true;
   els.loadBtn.disabled = true;
+  els.copyMdBtn.disabled = true;
 
   const nodes = collectNodes(tree, []);
   for (let idx = 0; idx < nodes.length; idx++) {
@@ -558,6 +615,7 @@ async function analyzeAllNodes() {
   els.analyzeAllBtn.disabled = false;
   els.analyzeRootBtn.disabled = false;
   els.loadBtn.disabled = false;
+  els.copyMdBtn.disabled = false;
   isChecking = false;
 }
 
@@ -568,6 +626,7 @@ async function loadModel() {
   els.loadBtn.disabled = true;
   els.analyzeRootBtn.disabled = true;
   els.analyzeAllBtn.disabled = true;
+  els.copyMdBtn.disabled = true;
 
   selectedDevice = supportsWebGPU() ? "webgpu" : "wasm";
   setDeviceState("loading", selectedDevice === "webgpu" ? "WebGPU を試行中" : "CPU (WASM) を使用");
@@ -623,8 +682,17 @@ async function loadModel() {
   } finally {
     isLoading = false;
     els.loadBtn.disabled = false;
+    els.copyMdBtn.disabled = false;
     render();
   }
+}
+
+function resetAllParentLinks(node, parent = null, parentLineIndex = null) {
+  node.parent = parent;
+  node.parentLineIndex = parentLineIndex;
+  node.children.forEach((child, i) => {
+    if (child) resetAllParentLinks(child, node, i);
+  });
 }
 
 function clearAll() {
@@ -632,6 +700,41 @@ function clearAll() {
   resetNodeResults(tree);
   render();
   setProgress(classifier ? "準備完了" : "待機中", classifier ? 100 : 0);
+}
+
+function nodeToMarkdown(node, level = 0) {
+  const indent = "  ".repeat(level);
+  const lines = [];
+
+  for (let i = 0; i < 5; i++) {
+    const text = node.lines[i].trim();
+    if (!text && !node.children[i]) continue;
+
+    lines.push(`${indent}- **${LINE_NAMES[i]}**: ${text || ""}`.trimEnd());
+
+    if (node.children[i]) {
+      const childMd = nodeToMarkdown(node.children[i], level + 1);
+      if (childMd) lines.push(childMd);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+async function copyMarkdown() {
+  const md = nodeToMarkdown(tree, 0);
+  if (!md.trim()) {
+    alert("コピーする内容がありません。");
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(md);
+    setProgress("Markdownをコピーしました", 100);
+  } catch (e) {
+    console.error(e);
+    alert("クリップボードへのコピーに失敗しました。");
+  }
 }
 
 els.treeRoot.addEventListener("input", (event) => {
@@ -695,6 +798,7 @@ els.analyzeRootBtn.addEventListener("click", async () => {
   await analyzeSingleNode(tree.id);
 });
 els.analyzeAllBtn.addEventListener("click", analyzeAllNodes);
+els.copyMdBtn.addEventListener("click", copyMarkdown);
 els.clearBtn.addEventListener("click", clearAll);
 
 if (supportsWebGPU()) {
@@ -705,4 +809,5 @@ if (supportsWebGPU()) {
 setModelState("ready", "未ロード");
 setProgress("待機中", 0);
 
+resetAllParentLinks(tree);
 render();
