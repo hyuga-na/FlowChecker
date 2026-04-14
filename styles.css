@@ -433,3 +433,9 @@ select {
   background: white;
   color: var(--text);
 }
+
+.badge-wait,
+.line-badge.badge-wait {
+  background: #f3f4f6;
+  color: #374151;
+}
