@@ -32,6 +32,13 @@
     </div>
 
     <div class="top-buttons">
+      <select id="model-select">
+        <option value="small">GPU小: 0.5B</option>
+        <option value="medium" selected>GPU中: 3B</option>
+        <option value="large">GPU大: 7B</option>
+        <option value="cpu">CPU分類器</option>
+      </select>
+    
       <button id="load-btn" class="secondary">モデルを読み込む</button>
       <button id="analyze-root-btn" class="primary" disabled>ルートブロックを判定</button>
       <button id="analyze-all-btn" class="primary" disabled>全ブロックを判定</button>
