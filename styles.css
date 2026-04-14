@@ -424,3 +424,12 @@ textarea:focus {
   color: var(--muted);
   line-height: 1.7;
 }
+
+select {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 14px;
+  background: white;
+  color: var(--text);
+}
